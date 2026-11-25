@@ -105,6 +105,7 @@ private
    Lookahead           : constant := 4;
    Commit_Ticks        : constant := 6;
    Max_Deaths          : constant := 8;
+   Leave_Gap           : constant := 8;
 
    type Tile_Kind is (Wall, Floor);
 
@@ -112,6 +113,7 @@ private
       Kind   : Tile_Kind := Wall;
       Pellet : Boolean := False;
       Power  : Boolean := False;
+      House  : Boolean := False;
    end record;
 
    type Choice is record
@@ -128,6 +130,8 @@ private
       Mode       : Ghost_Mode := G_Chase;
       Home_X     : X_Pos := 0;
       Home_Y     : Y_Pos := 0;
+      Release    : Natural := 0;
+      Waiting    : Boolean := False;
       Last       : Choice := (others => <>);
    end record;
 

@@ -18,6 +18,8 @@ its stamp with `docs/version.txt` when that file can be fetched.
 - **Start**, **Stop**, **Speed**, **Reset**.
 - **Grid seed** builds the maze. 0 is the fixed hand-made maze. Any other
   seed builds a connected maze, with one power pellet in each quarter.
+  Both have side tunnels that wrap at mid-height, no dead-end corridors,
+  and a pen in the centre where the ghosts start.
 - **Eater seed** picks the opening cell and the eater's tie-break.
 - **Ghost seed** picks which ghost chases, which cuts ahead, and which two
   cover. The ghost rules do not read the eater seed.

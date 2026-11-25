@@ -487,6 +487,9 @@ function draw() {
       } else if (tile === 3) {
         ctx.fillStyle = "#f07167";
         poly([px + cell / 2, py + cell * 0.22, px + cell * 0.78, py + cell / 2, px + cell / 2, py + cell * 0.78, px + cell * 0.22, py + cell / 2]);
+      } else if (tile === 4) {
+        ctx.fillStyle = "#1b3a5a";
+        ctx.fillRect(px + 1, py + 1, cell - 2, cell - 2);
       }
     }
   }
@@ -496,12 +499,7 @@ function draw() {
     const mode = ada.hs_ghost_mode(id);
     const r = cell * 0.34;
     ctx.fillStyle = mode === 3 ? "#d9d3c5" : COLORS[id - 1];
-    if (mode === 4) {
-      ctx.strokeStyle = COLORS[id - 1];
-      ctx.lineWidth = 2;
-      ctx.strokeRect(x - r * 0.45, y - r * 0.45, r * 0.9, r * 0.9);
-      continue;
-    }
+    if (mode === 4) ctx.globalAlpha = 0.55;
     if (id === 1) poly([x, y - r, x + r, y, x, y + r, x - r, y]);
     else if (id === 2) poly([x, y - r, x + r, y + r * 0.8, x - r, y + r * 0.8]);
     else if (id === 3) poly([x, y - r, x + r * 0.86, y - r * 0.4, x + r * 0.86, y + r * 0.4, x, y + r, x - r * 0.86, y + r * 0.4, x - r * 0.86, y - r * 0.4]);
@@ -510,6 +508,7 @@ function draw() {
       ctx.fillStyle = "#1a1e28";
       ctx.fillRect(x - r * 0.45, y - r * 0.45, r * 0.9, r * 0.9);
     }
+    ctx.globalAlpha = 1;
   }
   const ex = ada.hs_eater_x() * cell, ey = ada.hs_eater_y() * cell;
   const dx = ada.hs_eater_dx(), dy = ada.hs_eater_dy();

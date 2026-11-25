@@ -42,8 +42,15 @@ begin
 
    Swarm.Start (G, 0, 1, 1);
    pragma Assert (Swarm.Started (G));
-   pragma Assert (Swarm.Pellets_Left (G) = 193);
+   pragma Assert (Swarm.Pellets_Left (G) = 221);
    pragma Assert (Swarm.Lives (G) = 5);
+   pragma Assert (Swarm.Tile_Code (G, 0, 10) /= 0);
+   pragma Assert (Swarm.Tile_Code (G, 18, 10) /= 0);
+   pragma Assert (Swarm.Tile_Code (G, 9, 8) = 4);
+   pragma Assert (Swarm.Ghost_X (G, 1) = 8 and then Swarm.Ghost_Y (G, 1) = 8);
+   pragma Assert (Swarm.Ghost_X (G, 2) = 10 and then Swarm.Ghost_Y (G, 2) = 8);
+   pragma Assert (Swarm.Ghost_X (G, 3) = 8 and then Swarm.Ghost_Y (G, 3) = 9);
+   pragma Assert (Swarm.Ghost_X (G, 4) = 10 and then Swarm.Ghost_Y (G, 4) = 9);
    pragma Assert (Swarm.Tile_Code (G, Swarm.Eater_X (G), Swarm.Eater_Y (G)) /= 0);
    pragma Assert (Swarm.Tile_Code (G, -1, 0) = 0);
    for I in 1 .. 40 loop
