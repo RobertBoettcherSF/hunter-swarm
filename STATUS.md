@@ -4,7 +4,7 @@
 - Live: none yet (the repository stays private; Pages is wired but not enabled)
 - Test: none yet (private repo; githack cannot serve it). Local: open `docs/index.html` after `./build.sh`. The stamp in that file matches `docs/version.txt`.
 - What: self-playing maze chase. Rules and both AIs are plain Ada compiled to WebAssembly. The page draws, takes buttons, and downloads reports.
-- Status (2026-11-25): first playable build. Games run themselves to a win, a loss, or the tick cap. Stamp is the string in `version.txt`.
+- Status (2026-11-25): first playable build. Games run themselves to a win, a loss, or the tick cap. Stamp `v0.1 b20261125-0944 a1280d0`.
 - SPARK: not started (D-008). No proof run.
 - Gap: none recorded against D-005, D-007, D-025, or D-027. Wasm checks are off on purpose (D-027); `./run-tests.sh` runs the contracts.
 - Next: none agreed. Open questions are below.
