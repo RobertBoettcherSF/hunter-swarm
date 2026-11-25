@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hunter Swarm</title>
+<style>
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #12151c; color: #e6e2d6; font: 16px/1.4 system-ui, sans-serif; overflow-x: hidden; }
+header, .bar, .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+header { padding: 8px 12px 0; }
+h1 { font-size: 1.25rem; margin: 0; }
+.bar, .row, #status, #blurb, #expect, #crash, #stale, details { margin: 8px 12px; }
+button, select, input { font: inherit; min-height: 44px; }
+button { background: #243044; color: inherit; border: 1px solid #5c6b82; border-radius: 6px; padding: 6px 12px; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+button[aria-pressed="true"] { outline: 2px solid #f4d35e; }
+.flag { width: 22px; height: 14px; vertical-align: middle; }
+#stamp { font-family: ui-monospace, monospace; font-size: 12px; opacity: 0.85; overflow-wrap: anywhere; }
+#levelmark { font-size: 1.05rem; padding: 4px 10px; border: 1px solid #5c6b82; border-radius: 6px; background: #243044; }
+#view { display: block; margin: 8px auto; background: #1a1e28; max-width: calc(100% - 16px); touch-action: manipulation; }
+#expect, #crash, #stale { border: 1px solid #8a93a6; padding: 8px; background: #1c2230; }
+#crash, #stale { border-color: #c45c4a; }
+textarea { width: 100%; min-height: 64px; font: inherit; }
+label { display: flex; gap: 8px; align-items: center; }
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1 data-i18n="title">Hunter Swarm</h1>
+  <strong id="levelmark">Level 1</strong>
+  <span id="stamp">__STAMP__</span>
+  <span id="langs"></span>
+  <button id="sound" type="button" aria-pressed="true"></button>
+</header>
+<p id="blurb" data-i18n="blurb"></p>
+<div class="bar">
+  <button id="start" type="button" data-i18n="start"></button>
+  <button id="stop" type="button" data-i18n="stop"></button>
+  <button id="reset" type="button" data-i18n="reset"></button>
+  <label><span data-i18n="speed"></span>
+    <select id="speed">
+      <option value="0">1×</option>
+      <option value="1">2×</option>
+      <option value="2">4×</option>
+      <option value="3">8×</option>
+    </select>
+  </label>
+  <button id="debug" type="button" data-i18n="debug"></button>
+</div>
+<div class="row">
+  <label><span data-i18n="grid"></span> <input id="grid" type="number" min="0" step="1" value="0"></label>
+  <label><span data-i18n="eater"></span> <input id="eater" type="number" min="0" step="1" value="1"></label>
+  <label><span data-i18n="ghosts"></span> <input id="ghosts" type="number" min="0" step="1" value="1"></label>
+  <button id="newseeds" type="button" data-i18n="newseeds"></button>
+</div>
+<p id="status"></p>
+<div id="stale" hidden>
+  <span data-i18n="stale"></span>
+</div>
+<div id="crash" hidden>
+  <p data-i18n="crash"></p>
+  <button id="crashdl" type="button" data-i18n="crashdl"></button>
+  <button id="crashhide" type="button" data-i18n="dismiss"></button>
+</div>
+<div id="expect" hidden>
+  <p data-i18n="expected_help"></p>
+  <textarea id="expected" maxlength="160"></textarea>
+  <button id="expectgo" type="button" data-i18n="download_debug"></button>
+</div>
+<canvas id="view" width="608" height="672"></canvas>
+<p id="legend"></p>
+<details>
+  <summary data-i18n="tuning"></summary>
+  <p data-i18n="tuning_help"></p>
+  <div id="params"></div>
+</details>
+<p id="saved"></p>
+<script>
+"use strict";
+const sound = document.getElementById("sound");
+const langs = document.getElementById("langs");
+const grid = document.getElementById("grid");
+const eater = document.getElementById("eater");
+const ghosts = document.getElementById("ghosts");
+const newseeds = document.getElementById("newseeds");
+const levelmark = document.getElementById("levelmark");
+const start = document.getElementById("start");
+const stop = document.getElementById("stop");
+const reset = document.getElementById("reset");
+const debug = document.getElementById("debug");
+const expectBox = document.getElementById("expect");
+const expected = document.getElementById("expected");
+const expectgo = document.getElementById("expectgo");
+const speed = document.getElementById("speed");
+const status = document.getElementById("status");
+const saved = document.getElementById("saved");
+const crash = document.getElementById("crash");
+const crashdl = document.getElementById("crashdl");
+const crashhide = document.getElementById("crashhide");
+const stale = document.getElementById("stale");
+const params = document.getElementById("params");
+const view = document.getElementById("view");
+const legend = document.getElementById("legend");
+const STAMP = "__STAMP__";
+const WASM = "__WASM_BASE64__";
+const NAMES = ["Wisp", "Bramble", "Cinder", "Mote"];
+const COLORS = ["#2ec4b6", "#ee9b00", "#9b5de5", "#8ac926"];
+const DECISION_KEYS = ["ready", "seek_pellet", "seek_power", "flee", "hunt", "chase", "cutoff", "cover", "ghost_flee", "return_home"];
+const STR = {
+  "en-GB": {
+    title: "Hunter Swarm",
+    blurb: "A self-playing maze chase. The eater plays for the highest score. The ghost team plays to keep that score low.",
+    start: "Start", stop: "Stop", reset: "Reset", speed: "Speed", debug: "Debug",
+    sound_on: "Sound on", sound_off: "Sound off",
+    grid: "Grid seed", eater: "Eater seed", ghosts: "Ghost seed", newseeds: "New seeds",
+    lives: "Lives", score: "Score", pellets: "Pellets", tick: "Tick", level: "Level",
+    ready: "Ready", running: "Running", paused: "Paused", won: "The eater cleared the maze", lost: "The ghost team stopped the eater", timed_out: "Time limit", level_clear: "Level clear",
+    expected_help: "What did you expect?", download_debug: "Download debug report",
+    crash: "The last visit did not end cleanly.", crashdl: "Download crash report", dismiss: "Dismiss",
+    stale: "A newer build is on main. Reload the latest page.",
+    tuning: "Tuning", tuning_help: "These numbers are copied into each report.",
+    seek_pellet: "seeking pellets", seek_power: "going for a power pellet", flee: "avoiding the ghosts",
+    hunt: "hunting a frightened ghost", chase: "chasing", cutoff: "cutting off", cover: "covering",
+    ghost_flee: "fleeing", return_home: "returning", none: "waiting", ready_d: "waiting"
+  },
+  de: {
+    title: "Hunter Swarm",
+    blurb: "Eine Jagd durch ein Labyrinth, die von selbst spielt. Der Fresser spielt auf die höchste Punktzahl. Die Geistermannschaft spielt darauf, die Punktzahl niedrig zu halten.",
+    start: "Start", stop: "Stopp", reset: "Zurücksetzen", speed: "Tempo", debug: "Debug",
+    sound_on: "Ton an", sound_off: "Ton aus",
+    grid: "Labyrinth-Startwert", eater: "Fresser-Startwert", ghosts: "Geister-Startwert", newseeds: "Neue Startwerte",
+    lives: "Leben", score: "Punkte", pellets: "Krümel", tick: "Takt", level: "Stufe",
+    ready: "Bereit", running: "Läuft", paused: "Pausiert", won: "Der Fresser hat das Labyrinth geleert", lost: "Die Geistermannschaft hat den Fresser gestoppt", timed_out: "Zeitgrenze", level_clear: "Stufe geschafft",
+    expected_help: "Was hatten Sie erwartet?", download_debug: "Debug-Bericht laden",
+    crash: "Der letzte Besuch endete nicht sauber.", crashdl: "Absturzbericht laden", dismiss: "Schließen",
+    stale: "Auf main liegt ein neuerer Stand. Laden Sie die neueste Seite.",
+    tuning: "Einstellungen", tuning_help: "Diese Zahlen stehen in jedem Bericht.",
+    seek_pellet: "sucht Krümel", seek_power: "läuft zu einem Kraftkrümel", flee: "weicht den Geistern aus",
+    hunt: "jagt einen verängstigten Geist", chase: "verfolgt", cutoff: "schneidet den Weg ab", cover: "deckt ab",
+    ghost_flee: "flieht", return_home: "kehrt zurück", none: "wartet", ready_d: "wartet"
+  },
+  es: {
+    title: "Hunter Swarm",
+    blurb: "Una persecución en un laberinto que se juega sola. El comedor busca la mayor puntuación. El equipo de fantasmas intenta mantenerla baja.",
+    start: "Empezar", stop: "Parar", reset: "Reiniciar", speed: "Velocidad", debug: "Depurar",
+    sound_on: "Sonido activado", sound_off: "Sonido desactivado",
+    grid: "Semilla del laberinto", eater: "Semilla del comedor", ghosts: "Semilla de los fantasmas", newseeds: "Nuevas semillas",
+    lives: "Vidas", score: "Puntos", pellets: "Bolitas", tick: "Ciclo", level: "Nivel",
+    ready: "Listo", running: "En juego", paused: "En pausa", won: "El comedor vació el laberinto", lost: "El equipo de fantasmas detuvo al comedor", timed_out: "Límite de tiempo", level_clear: "Nivel superado",
+    expected_help: "¿Qué esperaba?", download_debug: "Descargar informe de depuración",
+    crash: "La visita anterior no terminó bien.", crashdl: "Descargar informe de fallo", dismiss: "Cerrar",
+    stale: "Hay una versión más nueva en main. Recargue la página más reciente.",
+    tuning: "Ajustes", tuning_help: "Estos números van en cada informe.",
+    seek_pellet: "busca bolitas", seek_power: "va a una bolita de fuerza", flee: "esquiva a los fantasmas",
+    hunt: "caza a un fantasma asustado", chase: "persigue", cutoff: "corta la huida", cover: "cubre",
+    ghost_flee: "huye", return_home: "regresa", none: "espera", ready_d: "espera"
+  },
+  fr: {
+    title: "Hunter Swarm",
+    blurb: "Une poursuite dans un labyrinthe qui se joue toute seule. Le mangeur vise le meilleur score. L'équipe de fantômes vise à le garder bas.",
+    start: "Démarrer", stop: "Arrêter", reset: "Réinitialiser", speed: "Vitesse", debug: "Déboguer",
+    sound_on: "Son activé", sound_off: "Son coupé",
+    grid: "Graine du labyrinthe", eater: "Graine du mangeur", ghosts: "Graine des fantômes", newseeds: "Nouvelles graines",
+    lives: "Vies", score: "Score", pellets: "Pastilles", tick: "Cycle", level: "Niveau",
+    ready: "Prêt", running: "En cours", paused: "En pause", won: "Le mangeur a vidé le labyrinthe", lost: "L'équipe de fantômes a arrêté le mangeur", timed_out: "Limite de temps", level_clear: "Niveau réussi",
+    expected_help: "Qu'attendiez-vous ?", download_debug: "Télécharger le rapport de débogage",
+    crash: "La visite précédente ne s'est pas terminée correctement.", crashdl: "Télécharger le rapport de plantage", dismiss: "Fermer",
+    stale: "Une version plus récente est sur main. Rechargez la page la plus récente.",
+    tuning: "Réglages", tuning_help: "Ces nombres sont recopiés dans chaque rapport.",
+    seek_pellet: "cherche des pastilles", seek_power: "va vers une pastille de force", flee: "évite les fantômes",
+    hunt: "chasse un fantôme effrayé", chase: "poursuit", cutoff: "coupe la fuite", cover: "couvre",
+    ghost_flee: "fuit", return_home: "rentre", none: "attend", ready_d: "attend"
+  }
+};
+const FLAGS = {
+  "en-GB": '<svg class="flag" viewBox="0 0 60 36" aria-hidden="true"><rect width="60" height="36" fill="#012169"/><path d="M0 0 L60 36 M60 0 L0 36" stroke="#fff" stroke-width="8"/><path d="M0 0 L60 36 M60 0 L0 36" stroke="#C8102E" stroke-width="4"/><path d="M30 0 V36 M0 18 H60" stroke="#fff" stroke-width="14"/><path d="M30 0 V36 M0 18 H60" stroke="#C8102E" stroke-width="8"/></svg>',
+  de: '<svg class="flag" viewBox="0 0 60 36" aria-hidden="true"><rect width="60" height="12" fill="#000"/><rect y="12" width="60" height="12" fill="#DD0000"/><rect y="24" width="60" height="12" fill="#FFCE00"/></svg>',
+  es: '<svg class="flag" viewBox="0 0 60 36" aria-hidden="true"><rect width="60" height="36" fill="#C60B1E"/><rect y="9" width="60" height="18" fill="#FFC400"/></svg>',
+  fr: '<svg class="flag" viewBox="0 0 60 36" aria-hidden="true"><rect width="20" height="36" fill="#0055A4"/><rect x="20" width="20" height="36" fill="#fff"/><rect x="40" width="20" height="36" fill="#EF4135"/></svg>'
+};
+let lang = localStorage.getItem("hs.lang") || "en-GB";
+if (!STR[lang]) lang = "en-GB";
+let soundOn = localStorage.getItem("hs.sound") !== "0";
+let ada, running = false, paused = false, ended = false, startedKey = "";
+let frameN = 0, fatal = false, crashSaved = false, audioCtx = null;
+const unknownImports = [];
+const store = sessionStorage;
+const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+function t(key) { return (STR[lang] && STR[lang][key]) || STR["en-GB"][key] || key; }
+function applyLang() {
+  document.documentElement.lang = lang;
+  document.querySelectorAll("[data-i18n]").forEach(el => { el.textContent = t(el.dataset.i18n); });
+  document.title = t("title");
+  sound.textContent = soundOn ? t("sound_on") : t("sound_off");
+  sound.setAttribute("aria-pressed", soundOn ? "true" : "false");
+  langs.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", b.dataset.lang === lang ? "true" : "false"));
+  localStorage.setItem("hs.lang", lang);
+  draw();
+}
+function flagButton(code, label) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.dataset.lang = code;
+  b.innerHTML = FLAGS[code] + " " + label;
+  b.setAttribute("aria-label", label);
+  b.addEventListener("click", () => { lang = code; applyLang(); });
+  return b;
+}
+[["en-GB", "English"], ["de", "Deutsch"], ["es", "Español"], ["fr", "Français"]].forEach(([c, n]) => langs.appendChild(flagButton(c, n)));
+
+function unlock() {
+  if (!audioCtx) audioCtx = new AudioContext();
+  if (audioCtx.state === "suspended") audioCtx.resume();
+}
+function beep(freq, dur, gain) {
+  if (!soundOn || !audioCtx || document.hidden) return;
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.frequency.value = freq;
+  o.type = "sine";
+  g.gain.value = gain;
+  o.connect(g); g.connect(audioCtx.destination);
+  const now = audioCtx.currentTime;
+  g.gain.setValueAtTime(gain, now);
+  g.gain.exponentialRampToValueAtTime(0.001, now + dur);
+  o.start(now); o.stop(now + dur);
+}
+sound.addEventListener("click", () => {
+  unlock();
+  soundOn = !soundOn;
+  localStorage.setItem("hs.sound", soundOn ? "1" : "0");
+  applyLang();
+});
+addEventListener("pointerdown", unlock, {once: false});
+document.addEventListener("visibilitychange", () => { if (document.hidden && audioCtx) audioCtx.suspend(); });
+
+function seedOf(el) {
+  const n = Number(el.value);
+  if (!Number.isFinite(n) || n < 0) return 1;
+  return n >>> 0;
+}
+function newSeeds() {
+  const a = new Uint32Array(3);
+  crypto.getRandomValues(a);
+  grid.value = String(a[0]);
+  eater.value = String(a[1]);
+  ghosts.value = String(a[2]);
+}
+function rememberSeeds() {
+  sessionStorage.setItem("hs.seeds", grid.value + "," + eater.value + "," + ghosts.value);
+}
+newseeds.addEventListener("click", () => { newSeeds(); rememberSeeds(); });
+{
+  const savedSeeds = sessionStorage.getItem("hs.seeds");
+  if (savedSeeds) {
+    const parts = savedSeeds.split(",");
+    if (parts.length === 3) {
+      grid.value = parts[0];
+      eater.value = parts[1];
+      ghosts.value = parts[2];
+    }
+  } else {
+    newSeeds();
+    rememberSeeds();
+  }
+}
+grid.addEventListener("change", rememberSeeds);
+eater.addEventListener("change", rememberSeeds);
+ghosts.addEventListener("change", rememberSeeds);
+
+function readReport() {
+  const n = ada.hs_report_len();
+  const bytes = new Uint8Array(n);
+  for (let i = 0; i < n; i++) bytes[i] = ada.hs_report_byte(i + 1) & 255;
+  return new TextDecoder().decode(bytes);
+}
+function writeText(setLen, setChar, text, max) {
+  const bytes = new TextEncoder().encode(text).slice(0, max);
+  setLen(bytes.length);
+  for (let i = 0; i < bytes.length; i++) setChar(i + 1, bytes[i]);
+}
+function env() {
+  return {
+    browser: navigator.userAgent,
+    language: lang,
+    viewport: [innerWidth, innerHeight],
+    reduced_motion: reduced,
+    sound: soundOn,
+    unknown_imports: unknownImports.slice()
+  };
+}
+function finishReport(which, testKey) {
+  writeText(ada.hs_set_stamp_len, ada.hs_set_stamp_char, STAMP, 80);
+  ada.hs_set_test_key(testKey);
+  ada.hs_build_report(which);
+  const raw = readReport();
+  let obj;
+  try { obj = JSON.parse(raw); }
+  catch (e) { return raw; }
+  obj.environment = Object.assign(obj.environment || {}, env());
+  obj.stamp = STAMP;
+  return JSON.stringify(obj, null, 1);
+}
+function fileName(side) {
+  const safe = STAMP.replace(/[^A-Za-z0-9._-]+/g, "_");
+  return "hunter-swarm-" + side + "-g" + seedOf(grid) + "-e" + seedOf(eater) + "-h" + seedOf(ghosts) + "-t" + ada.hs_tick_count() + "-" + safe + ".json";
+}
+function download(name, text) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text], {type: "application/json"}));
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+let lastEater = "", lastGhosts = "";
+function savePair(testKey) {
+  lastEater = finishReport(0, testKey);
+  lastGhosts = finishReport(1, testKey);
+  download(fileName("eater"), lastEater);
+  download(fileName("ghosts"), lastGhosts);
+  saved.innerHTML = "";
+  const e = document.createElement("button");
+  e.type = "button";
+  e.textContent = fileName("eater");
+  e.addEventListener("click", () => download(e.textContent, lastEater));
+  const g = document.createElement("button");
+  g.type = "button";
+  g.textContent = fileName("ghosts");
+  g.addEventListener("click", () => download(g.textContent, lastGhosts));
+  saved.append(e, document.createTextNode(" "), g);
+}
+function showCrash(text) {
+  fatal = true;
+  crashSaved = true;
+  store.setItem("hs.crash", text);
+  crash.hidden = false;
+  crashdl.onclick = () => download(fileName("crash"), text);
+}
+
+const crashedBefore = store.getItem("hs.clean") === "0";
+store.setItem("hs.clean", "0");
+addEventListener("pagehide", () => { if (!fatal) store.setItem("hs.clean", "1"); });
+if (crashedBefore) {
+  crash.hidden = false;
+  const savedCrash = store.getItem("hs.crash") || "";
+  crashdl.onclick = () => download("hunter-swarm-crash-" + STAMP.replace(/[^A-Za-z0-9._-]+/g, "_") + ".json", savedCrash || "{}");
+}
+crashhide.addEventListener("click", () => { crash.hidden = true; });
+
+function onTrap(err) {
+  if (crashSaved) return;
+  let text;
+  try {
+    text = finishReport(3, 3);
+    const obj = JSON.parse(text);
+    if (!obj.errors || !obj.errors.length) obj.errors = [{kind: "trap", file: "js", line: 0}];
+    obj.errors[0].detail = String(err);
+    text = JSON.stringify(obj, null, 1);
+  } catch (e) {
+    text = JSON.stringify({schema: "hunter-swarm-report", schema_version: "v1", stamp: STAMP, seeds: {grid: seedOf(grid), eater: seedOf(eater), ghosts: seedOf(ghosts)}, test_key: "crash", expected: "", action_log: [], state_hash: "", events: [], events_dropped: 0, errors: [{kind: "trap", file: "js", line: 0, detail: String(err)}], environment: env(), custom: {side: "crash"}}, null, 1);
+  }
+  showCrash(text);
+  download(fileName("crash"), text);
+}
+
+function begin() {
+  ada.hs_start(seedOf(grid), seedOf(eater), seedOf(ghosts));
+  startedKey = seedOf(grid) + ":" + seedOf(eater) + ":" + seedOf(ghosts);
+  ended = false;
+  paused = false;
+}
+function onStart() {
+  unlock();
+  const key = seedOf(grid) + ":" + seedOf(eater) + ":" + seedOf(ghosts);
+  if (!startedKey || ended || key !== startedKey) begin();
+  running = true;
+  paused = false;
+  beep(440, 0.05, 0.03);
+}
+function onStop() {
+  if (!startedKey) return;
+  running = false;
+  paused = true;
+  savePair(1);
+  beep(220, 0.08, 0.03);
+}
+function onReset() {
+  running = false;
+  paused = false;
+  begin();
+  draw();
+}
+start.addEventListener("click", onStart);
+stop.addEventListener("click", onStop);
+reset.addEventListener("click", onReset);
+
+function openDebug() {
+  running = false;
+  paused = true;
+  expectBox.hidden = false;
+  expected.focus();
+}
+debug.addEventListener("click", openDebug);
+addEventListener("keydown", ev => {
+  if (ev.key !== "F9") return;
+  if (["INPUT", "TEXTAREA", "SELECT"].includes(ev.target.tagName)) return;
+  ev.preventDefault();
+  openDebug();
+});
+expected.addEventListener("input", () => { expectgo.disabled = expected.value.trim().length === 0; });
+expectgo.disabled = true;
+expectgo.addEventListener("click", () => {
+  writeText(ada.hs_set_expected_len, ada.hs_set_expected_char, expected.value.trim(), 160);
+  const text = finishReport(2, 0);
+  download(fileName("f9"), text);
+});
+
+const SPEED = [{every: 6, burst: 1}, {every: 3, burst: 1}, {every: 1, burst: 1}, {every: 1, burst: 4}];
+const OUTCOME = ["running", "won", "lost", "timed_out", "level_clear"];
+function stepGame() {
+  const sp = SPEED[Number(speed.value)] || SPEED[0];
+  frameN += 1;
+  if (!running) return;
+  if (frameN % sp.every !== 0) return;
+  let heard = false;
+  for (let n = 0; n < sp.burst; n++) {
+    const before = ada.hs_score();
+    const pellets = ada.hs_pellets();
+    const lives = ada.hs_lives();
+    let oc;
+    try { oc = ada.hs_tick(); }
+    catch (err) { onTrap(err); running = false; return; }
+    if (!heard) {
+      if (ada.hs_lives() < lives) { beep(160, 0.16, 0.05); heard = true; }
+      else if (ada.hs_score() - before >= 50 && ada.hs_pellets() < pellets) { beep(520, 0.07, 0.03); heard = true; }
+      else if (ada.hs_score() - before >= 200) { beep(740, 0.06, 0.04); heard = true; }
+    }
+    if (oc === 4) {
+      savePair(4);
+      ada.hs_advance();
+      grid.value = String(ada.hs_grid_seed() >>> 0);
+      rememberSeeds();
+      startedKey = seedOf(grid) + ":" + seedOf(eater) + ":" + seedOf(ghosts);
+      beep(620, 0.08, 0.04);
+      return;
+    }
+    if (oc !== 0) {
+      running = false;
+      ended = true;
+      if (oc === 1) beep(660, 0.12, 0.04);
+      else beep(140, 0.2, 0.05);
+      savePair(2);
+      return;
+    }
+  }
+}
+
+const ctx = view.getContext("2d");
+function layout() {
+  const cell = Math.max(8, Math.min(28, Math.floor((Math.min(innerWidth, 820) - 16) / ada.hs_width())));
+  const cssW = cell * ada.hs_width();
+  const cssH = cell * ada.hs_height();
+  view.style.width = cssW + "px";
+  view.style.height = cssH + "px";
+  const dpr = Math.min(2, devicePixelRatio || 1);
+  view.width = Math.floor(cssW * dpr);
+  view.height = Math.floor(cssH * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  return cell;
+}
+function poly(points) {
+  ctx.beginPath();
+  ctx.moveTo(points[0], points[1]);
+  for (let i = 2; i < points.length; i += 2) ctx.lineTo(points[i], points[i + 1]);
+  ctx.closePath();
+  ctx.fill();
+}
+function draw() {
+  if (!ada) return;
+  const cell = layout();
+  const W = ada.hs_width(), H = ada.hs_height();
+  ctx.clearRect(0, 0, cell * W, cell * H);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const tile = ada.hs_tile(x, y);
+      const px = x * cell, py = y * cell;
+      if (tile === 0) {
+        ctx.fillStyle = "#2a3548";
+        ctx.fillRect(px + 1, py + 1, cell - 2, cell - 2);
+      } else if (tile === 2) {
+        ctx.fillStyle = "#d7e3f4";
+        ctx.fillRect(px + cell * 0.38, py + cell * 0.38, cell * 0.24, cell * 0.24);
+      } else if (tile === 3) {
+        ctx.fillStyle = "#f07167";
+        poly([px + cell / 2, py + cell * 0.22, px + cell * 0.78, py + cell / 2, px + cell / 2, py + cell * 0.78, px + cell * 0.22, py + cell / 2]);
+      } else if (tile === 4) {
+        ctx.fillStyle = "#1b3a5a";
+        ctx.fillRect(px + 1, py + 1, cell - 2, cell - 2);
+      }
+    }
+  }
+  for (let id = 1; id <= 4; id++) {
+    const x = ada.hs_ghost_x(id) * cell + cell / 2;
+    const y = ada.hs_ghost_y(id) * cell + cell / 2;
+    const mode = ada.hs_ghost_mode(id);
+    const r = cell * 0.34;
+    ctx.fillStyle = mode === 3 ? "#d9d3c5" : COLORS[id - 1];
+    if (mode === 4) ctx.globalAlpha = 0.55;
+    if (id === 1) poly([x, y - r, x + r, y, x, y + r, x - r, y]);
+    else if (id === 2) poly([x, y - r, x + r, y + r * 0.8, x - r, y + r * 0.8]);
+    else if (id === 3) poly([x, y - r, x + r * 0.86, y - r * 0.4, x + r * 0.86, y + r * 0.4, x, y + r, x - r * 0.86, y + r * 0.4, x - r * 0.86, y - r * 0.4]);
+    else {
+      ctx.fillRect(x - r, y - r, r * 2, r * 2);
+      ctx.fillStyle = "#1a1e28";
+      ctx.fillRect(x - r * 0.45, y - r * 0.45, r * 0.9, r * 0.9);
+    }
+    ctx.globalAlpha = 1;
+  }
+  const ex = ada.hs_eater_x() * cell, ey = ada.hs_eater_y() * cell;
+  const dx = ada.hs_eater_dx(), dy = ada.hs_eater_dy();
+  ctx.fillStyle = "#f4d35e";
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(ex + cell * 0.16, ey + cell * 0.16, cell * 0.68, cell * 0.68, cell * 0.16);
+  else ctx.rect(ex + cell * 0.16, ey + cell * 0.16, cell * 0.68, cell * 0.68);
+  ctx.fill();
+  ctx.fillStyle = "#1a1e28";
+  ctx.fillRect(ex + cell * 0.32, ey + cell * 0.32, cell * 0.1, cell * 0.1);
+  ctx.fillRect(ex + cell * 0.56, ey + cell * 0.32, cell * 0.1, cell * 0.1);
+  ctx.fillStyle = "#c4491d";
+  poly([ex + cell * 0.5 + dx * cell * 0.28, ey + cell * 0.62 + dy * cell * 0.28,
+        ex + cell * 0.38 + dx * cell * 0.08, ey + cell * 0.74 + dy * cell * 0.08,
+        ex + cell * 0.62 + dx * cell * 0.08, ey + cell * 0.74 + dy * cell * 0.08]);
+  const oc = ada.hs_outcome();
+  const code = ada.hs_decision(0);
+  const key = DECISION_KEYS[code] || "none";
+  const word = ended ? t(OUTCOME[oc] || "ready") : paused ? t("paused") : running ? t("running") : t("ready");
+  levelmark.textContent = t("level") + " " + ada.hs_level();
+  status.textContent = t("level") + " " + ada.hs_level()
+    + " · " + t("score") + " " + ada.hs_score()
+    + " · " + t("lives") + " " + ada.hs_lives()
+    + " · " + t("pellets") + " " + ada.hs_pellets()
+    + " · " + t("tick") + " " + ada.hs_tick_count()
+    + " · " + word
+    + " · " + t(key === "ready" ? "ready_d" : key);
+  legend.textContent = NAMES.map((n, i) => n).join(" · ");
+}
+function frame() {
+  stepGame();
+  draw();
+  requestAnimationFrame(frame);
+}
+addEventListener("resize", draw);
+
+function loadParams() {
+  const savedP = JSON.parse(localStorage.getItem("hs.params") || "null");
+  const box = params;
+  box.innerHTML = "";
+  const n = ada.hs_param_count();
+  const labels = ["danger_radius", "power_seek", "threat_range", "hunt_range", "cutoff_lead", "role_interval", "fright_ticks", "starve_ticks", "ghost_stride"];
+  for (let i = 1; i <= n; i++) {
+    const lab = document.createElement("label");
+    const span = document.createElement("span");
+    span.textContent = labels[i - 1] || ("p" + i);
+    const input = document.createElement("input");
+    input.type = "number";
+    input.min = String(ada.hs_param_min(i));
+    input.max = String(ada.hs_param_max(i));
+    input.value = String((savedP && savedP[i]) || ada.hs_param(i));
+    input.addEventListener("change", () => {
+      const ok = ada.hs_set_param(i, Number(input.value) | 0);
+      input.value = String(ada.hs_param(i));
+      if (!ok) input.style.outline = "2px solid #c45c4a";
+      else input.style.outline = "";
+      const all = {};
+      for (let k = 1; k <= n; k++) all[k] = ada.hs_param(k);
+      localStorage.setItem("hs.params", JSON.stringify(all));
+    });
+    if (savedP && savedP[i] != null) ada.hs_set_param(i, Number(savedP[i]) | 0);
+    input.value = String(ada.hs_param(i));
+    lab.append(span, input);
+    box.appendChild(lab);
+  }
+}
+
+fetch("version.txt", {cache: "no-store"}).then(r => r.ok ? r.text() : "").then(text => {
+  const got = text.trim();
+  if (got && got !== STAMP) stale.hidden = false;
+}).catch(() => {});
+if (location.protocol.startsWith("http")) {
+  fetch("https://raw.githubusercontent.com/RobertBoettcherSF/hunter-swarm/main/docs/version.txt", {cache: "no-store"})
+    .then(r => r.ok ? r.text() : "")
+    .then(text => { if (text.trim() && text.trim() !== STAMP) stale.hidden = false; })
+    .catch(() => {});
+}
+
+const imports = {
+  env: new Proxy({
+    hs_host_crash(addr, line) {
+      let file = "";
+      try {
+        const mem = new Uint8Array(ada.memory.buffer);
+        for (let i = addr; addr && i < mem.length && mem[i] && file.length < 160; i++) file += String.fromCharCode(mem[i]);
+      } catch (e) { file = ""; }
+      let text;
+      try {
+        text = finishReport(3, 3);
+        const obj = JSON.parse(text);
+        if (obj.errors) obj.errors.forEach(err => { if (!err.file) err.file = file || "unknown"; });
+        text = JSON.stringify(obj, null, 1);
+      } catch (e) {
+        text = String(e);
+      }
+      showCrash(text);
+      download(fileName("crash"), text);
+      throw new Error("last chance " + file + ":" + line);
+    }
+  }, {
+    get(target, prop) {
+      if (prop in target) return target[prop];
+      return (...args) => {
+        unknownImports.push(String(prop));
+        console.warn("unknown wasm import", prop, args);
+        return 0;
+      };
+    }
+  })
+};
+
+WebAssembly.instantiate(Uint8Array.from(atob(WASM), c => c.charCodeAt(0)), imports).then(obj => {
+  ada = obj.instance.exports;
+  loadParams();
+  begin();
+  applyLang();
+  requestAnimationFrame(frame);
+}).catch(err => { onTrap(err); status.textContent = String(err); });
+applyLang();
+</script>
+</body>
+</html>

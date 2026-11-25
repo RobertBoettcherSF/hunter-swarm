@@ -1,0 +1,7 @@
+obj/
+*.o
+*.ali
+b~*
+*.wasm
+sample-report.json
+toolchain/
