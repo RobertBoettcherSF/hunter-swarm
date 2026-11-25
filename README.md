@@ -16,9 +16,14 @@ After a build, open `docs/index.html` in a browser. Nothing else is fetched
 except a version check, which fails quietly while the repository is private.
 
 - **Start**, **Stop**, **Speed**, **Reset**.
-- The world seed picks the opening cell. The AI seed picks how the ghost roles
-  rotate. Both are shown, so a game can be played again.
-- **New seeds** fills both boxes. **Reset** builds that opening and waits.
+- **Grid seed** builds the maze. 0 is the fixed hand-made maze. Any other
+  seed builds a connected maze, with one power pellet in each quarter.
+- **Eater seed** picks the opening cell and the eater's tie-break.
+- **Ghost seed** picks which ghost chases, which cuts ahead, and which two
+  cover. The ghost rules do not read the eater seed.
+  All three are shown and can be edited before Start, and every report
+  records them.
+- **New seeds** fills the three boxes. **Reset** builds that opening and waits.
   **Start** runs it, or resumes after Stop.
 - **Stop**, and the end of a game, each download two files: an eater report
   and a ghost-team report. If a browser blocks the second file, the same
@@ -28,10 +33,10 @@ except a version check, which fails quietly while the repository is private.
 
 ## Reports
 
-JSON, schema `poncelet-report` v1. Each file has the stamp, both seeds, the
+JSON, schema `hunter-swarm-report` v1. Each file has the stamp, the three seeds, the
 test key (`stop`, `game-end`, `f9`, or `crash`), the action log, the state
 hash, events, errors, and a `custom` object with the settings, the score, the
-lives and the decisions for that side. `custom.summary` is three lines:
+lives and the decisions for that side. The eater file also lists `why_died` for each death. `custom.summary` is three lines:
 `BUILD`, `TEST KEY`, `SUMMARY`.
 
 ## Build and test
@@ -84,7 +89,7 @@ use the commit.
 
 ```
 src/swarm.ads swarm.adb           maze, both AIs, tick
-src/swarm-report.ad?              poncelet-report v1
+src/swarm-report.ad?              hunter-swarm-report v1
 src/swarm-api.ad?                 integer functions the page calls
 src/wasm/swarm-last_chance.ad?    browser last-chance handler
 web/template.html                 drawing, buttons, languages, sound

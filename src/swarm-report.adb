@@ -323,6 +323,10 @@ package body Swarm.Report is
          Add_Nat (Tick_Cap);
          Add (",""log_gap"":");
          Add_Nat (Log_Gap);
+         Add (",""lookahead"":");
+         Add_Nat (Lookahead);
+         Add (",""commit_ticks"":");
+         Add_Nat (Commit_Ticks);
          Add ("}");
       end Add_Settings;
    begin
@@ -339,15 +343,17 @@ package body Swarm.Report is
       end case;
       Len := 0;
       Too_Big := False;
-      Add ("{""schema"":""poncelet-report"",""schema_version"":""v1"",");
+      Add ("{""schema"":""hunter-swarm-report"",""schema_version"":""v1"",");
       Add ("""stamp"":""");
       if Stamp_Len > 0 then
          Add_Esc (Stamp (1 .. Stamp_Len));
       end if;
-      Add (""",""seeds"":{""world"":");
-      Add_Uns (G.World_Seed);
-      Add (",""ai"":");
-      Add_Uns (G.AI_Seed);
+      Add (""",""seeds"":{""grid"":");
+      Add_Uns (G.Grid_Seed);
+      Add (",""eater"":");
+      Add_Uns (G.Eater_Seed);
+      Add (",""ghosts"":");
+      Add_Uns (G.Ghost_Seed);
       Add ("},""test_key"":""");
       Add_Key;
       Add (""",""expected"":""");
@@ -453,6 +459,38 @@ package body Swarm.Report is
          Add_Nat (Ghost_Mode_Code (G, Id));
          Add ("}");
       end loop;
+      Add ("],""why_died"":[");
+      declare
+         First : Boolean := True;
+      begin
+         for I in 1 .. G.Death_Count loop
+            if not First then
+               Add (",");
+            end if;
+            First := False;
+            Add ("{""tick"":");
+            Add_Nat (G.Why (I).Tick);
+            Add (",""killer"":");
+            Add_Nat (G.Why (I).Killer);
+            Add (",""near"":[");
+            declare
+               First_Id : Boolean := True;
+            begin
+               for Id in Ghost_Id loop
+                  if (G.Why (I).Near / 2 ** (Id - 1)) mod 2 = 1 then
+                     if not First_Id then
+                        Add (",");
+                     end if;
+                     First_Id := False;
+                     Add_Nat (Id);
+                  end if;
+               end loop;
+            end;
+            Add ("],""exits"":");
+            Add_Nat (G.Why (I).Exits);
+            Add ("}");
+         end loop;
+      end;
       Add ("]}}");
       pragma Assert (not Too_Big);
       pragma Assert (Len > 2);

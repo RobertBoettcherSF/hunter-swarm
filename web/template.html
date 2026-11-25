@@ -50,8 +50,9 @@ label { display: flex; gap: 8px; align-items: center; }
   <button id="debug" type="button" data-i18n="debug"></button>
 </div>
 <div class="row">
-  <label><span data-i18n="world"></span> <input id="world" type="number" min="0" step="1" value="1"></label>
-  <label><span data-i18n="ai"></span> <input id="ai" type="number" min="0" step="1" value="1"></label>
+  <label><span data-i18n="grid"></span> <input id="grid" type="number" min="0" step="1" value="0"></label>
+  <label><span data-i18n="eater"></span> <input id="eater" type="number" min="0" step="1" value="1"></label>
+  <label><span data-i18n="ghosts"></span> <input id="ghosts" type="number" min="0" step="1" value="1"></label>
   <button id="newseeds" type="button" data-i18n="newseeds"></button>
 </div>
 <p id="status"></p>
@@ -80,8 +81,9 @@ label { display: flex; gap: 8px; align-items: center; }
 "use strict";
 const sound = document.getElementById("sound");
 const langs = document.getElementById("langs");
-const world = document.getElementById("world");
-const ai = document.getElementById("ai");
+const grid = document.getElementById("grid");
+const eater = document.getElementById("eater");
+const ghosts = document.getElementById("ghosts");
 const newseeds = document.getElementById("newseeds");
 const start = document.getElementById("start");
 const stop = document.getElementById("stop");
@@ -111,7 +113,7 @@ const STR = {
     blurb: "A self-playing maze chase. The eater plays for the highest score. The ghost team plays to keep that score low.",
     start: "Start", stop: "Stop", reset: "Reset", speed: "Speed", debug: "Debug",
     sound_on: "Sound on", sound_off: "Sound off",
-    world: "World seed", ai: "AI seed", newseeds: "New seeds",
+    grid: "Grid seed", eater: "Eater seed", ghosts: "Ghost seed", newseeds: "New seeds",
     lives: "Lives", score: "Score", pellets: "Pellets", tick: "Tick",
     ready: "Ready", running: "Running", paused: "Paused", won: "The eater cleared the maze", lost: "The ghost team stopped the eater", timed_out: "Time limit",
     expected_help: "What did you expect?", download_debug: "Download debug report",
@@ -127,7 +129,7 @@ const STR = {
     blurb: "Eine Jagd durch ein Labyrinth, die von selbst spielt. Der Fresser spielt auf die höchste Punktzahl. Die Geistermannschaft spielt darauf, die Punktzahl niedrig zu halten.",
     start: "Start", stop: "Stopp", reset: "Zurücksetzen", speed: "Tempo", debug: "Debug",
     sound_on: "Ton an", sound_off: "Ton aus",
-    world: "Welt-Startwert", ai: "KI-Startwert", newseeds: "Neue Startwerte",
+    grid: "Labyrinth-Startwert", eater: "Fresser-Startwert", ghosts: "Geister-Startwert", newseeds: "Neue Startwerte",
     lives: "Leben", score: "Punkte", pellets: "Krümel", tick: "Takt",
     ready: "Bereit", running: "Läuft", paused: "Pausiert", won: "Der Fresser hat das Labyrinth geleert", lost: "Die Geistermannschaft hat den Fresser gestoppt", timed_out: "Zeitgrenze",
     expected_help: "Was hatten Sie erwartet?", download_debug: "Debug-Bericht laden",
@@ -143,7 +145,7 @@ const STR = {
     blurb: "Una persecución en un laberinto que se juega sola. El comedor busca la mayor puntuación. El equipo de fantasmas intenta mantenerla baja.",
     start: "Empezar", stop: "Parar", reset: "Reiniciar", speed: "Velocidad", debug: "Depurar",
     sound_on: "Sonido activado", sound_off: "Sonido desactivado",
-    world: "Semilla del mundo", ai: "Semilla de la IA", newseeds: "Nuevas semillas",
+    grid: "Semilla del laberinto", eater: "Semilla del comedor", ghosts: "Semilla de los fantasmas", newseeds: "Nuevas semillas",
     lives: "Vidas", score: "Puntos", pellets: "Bolitas", tick: "Ciclo",
     ready: "Listo", running: "En juego", paused: "En pausa", won: "El comedor vació el laberinto", lost: "El equipo de fantasmas detuvo al comedor", timed_out: "Límite de tiempo",
     expected_help: "¿Qué esperaba?", download_debug: "Descargar informe de depuración",
@@ -159,7 +161,7 @@ const STR = {
     blurb: "Une poursuite dans un labyrinthe qui se joue toute seule. Le mangeur vise le meilleur score. L'équipe de fantômes vise à le garder bas.",
     start: "Démarrer", stop: "Arrêter", reset: "Réinitialiser", speed: "Vitesse", debug: "Déboguer",
     sound_on: "Son activé", sound_off: "Son coupé",
-    world: "Graine du monde", ai: "Graine de l'IA", newseeds: "Nouvelles graines",
+    grid: "Graine du labyrinthe", eater: "Graine du mangeur", ghosts: "Graine des fantômes", newseeds: "Nouvelles graines",
     lives: "Vies", score: "Score", pellets: "Pastilles", tick: "Cycle",
     ready: "Prêt", running: "En cours", paused: "En pause", won: "Le mangeur a vidé le labyrinthe", lost: "L'équipe de fantômes a arrêté le mangeur", timed_out: "Limite de temps",
     expected_help: "Qu'attendiez-vous ?", download_debug: "Télécharger le rapport de débogage",
@@ -240,27 +242,33 @@ function seedOf(el) {
   return n >>> 0;
 }
 function newSeeds() {
-  const a = new Uint32Array(2);
+  const a = new Uint32Array(3);
   crypto.getRandomValues(a);
-  world.value = String(a[0]);
-  ai.value = String(a[1]);
+  grid.value = String(a[0]);
+  eater.value = String(a[1]);
+  ghosts.value = String(a[2]);
 }
 function rememberSeeds() {
-  sessionStorage.setItem("hs.seeds", world.value + "," + ai.value);
+  sessionStorage.setItem("hs.seeds", grid.value + "," + eater.value + "," + ghosts.value);
 }
 newseeds.addEventListener("click", () => { newSeeds(); rememberSeeds(); });
 {
   const savedSeeds = sessionStorage.getItem("hs.seeds");
   if (savedSeeds) {
     const parts = savedSeeds.split(",");
-    if (parts.length === 2) { world.value = parts[0]; ai.value = parts[1]; }
+    if (parts.length === 3) {
+      grid.value = parts[0];
+      eater.value = parts[1];
+      ghosts.value = parts[2];
+    }
   } else {
     newSeeds();
     rememberSeeds();
   }
 }
-world.addEventListener("change", rememberSeeds);
-ai.addEventListener("change", rememberSeeds);
+grid.addEventListener("change", rememberSeeds);
+eater.addEventListener("change", rememberSeeds);
+ghosts.addEventListener("change", rememberSeeds);
 
 function readReport() {
   const n = ada.hs_report_len();
@@ -297,7 +305,7 @@ function finishReport(which, testKey) {
 }
 function fileName(side) {
   const safe = STAMP.replace(/[^A-Za-z0-9._-]+/g, "_");
-  return "hunter-swarm-" + side + "-w" + seedOf(world) + "-a" + seedOf(ai) + "-t" + ada.hs_tick_count() + "-" + safe + ".json";
+  return "hunter-swarm-" + side + "-g" + seedOf(grid) + "-e" + seedOf(eater) + "-h" + seedOf(ghosts) + "-t" + ada.hs_tick_count() + "-" + safe + ".json";
 }
 function download(name, text) {
   const a = document.createElement("a");
@@ -352,21 +360,21 @@ function onTrap(err) {
     obj.errors[0].detail = String(err);
     text = JSON.stringify(obj, null, 1);
   } catch (e) {
-    text = JSON.stringify({schema: "poncelet-report", schema_version: "v1", stamp: STAMP, seeds: {world: seedOf(world), ai: seedOf(ai)}, test_key: "crash", expected: "", action_log: [], state_hash: "", events: [], events_dropped: 0, errors: [{kind: "trap", file: "js", line: 0, detail: String(err)}], environment: env(), custom: {side: "crash"}}, null, 1);
+    text = JSON.stringify({schema: "hunter-swarm-report", schema_version: "v1", stamp: STAMP, seeds: {grid: seedOf(grid), eater: seedOf(eater), ghosts: seedOf(ghosts)}, test_key: "crash", expected: "", action_log: [], state_hash: "", events: [], events_dropped: 0, errors: [{kind: "trap", file: "js", line: 0, detail: String(err)}], environment: env(), custom: {side: "crash"}}, null, 1);
   }
   showCrash(text);
   download(fileName("crash"), text);
 }
 
 function begin() {
-  ada.hs_start(seedOf(world), seedOf(ai));
-  startedKey = seedOf(world) + ":" + seedOf(ai);
+  ada.hs_start(seedOf(grid), seedOf(eater), seedOf(ghosts));
+  startedKey = seedOf(grid) + ":" + seedOf(eater) + ":" + seedOf(ghosts);
   ended = false;
   paused = false;
 }
 function onStart() {
   unlock();
-  const key = seedOf(world) + ":" + seedOf(ai);
+  const key = seedOf(grid) + ":" + seedOf(eater) + ":" + seedOf(ghosts);
   if (!startedKey || ended || key !== startedKey) begin();
   running = true;
   paused = false;

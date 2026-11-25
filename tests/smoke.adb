@@ -40,9 +40,9 @@ begin
    pragma Assert (Swarm.Param_Max (Swarm.Ghost_Stride) = 4);
    pragma Assert (Swarm.Param_Min (99) = 0);
 
-   Swarm.Start (G, 1, 1);
+   Swarm.Start (G, 0, 1, 1);
    pragma Assert (Swarm.Started (G));
-   pragma Assert (Swarm.Pellets_Left (G) > 0);
+   pragma Assert (Swarm.Pellets_Left (G) = 193);
    pragma Assert (Swarm.Lives (G) = 5);
    pragma Assert (Swarm.Tile_Code (G, Swarm.Eater_X (G), Swarm.Eater_Y (G)) /= 0);
    pragma Assert (Swarm.Tile_Code (G, -1, 0) = 0);
@@ -50,14 +50,14 @@ begin
       Swarm.Tick (G);
    end loop;
    H1 := Swarm.State_Hash (G);
-   Swarm.Start (G, 1, 1);
+   Swarm.Start (G, 0, 1, 1);
    for I in 1 .. 40 loop
       Swarm.Tick (G);
    end loop;
    H2 := Swarm.State_Hash (G);
    pragma Assert (H1 = H2);
 
-   Swarm.Start (G, 1, 2);
+   Swarm.Start (G, 0, 1, 2);
    while Swarm.Outcome (G) = Swarm.Running loop
       Swarm.Tick (G);
    end loop;
@@ -77,11 +77,13 @@ begin
    Swarm.Report.Build (G, Swarm.Report.Side_F9);
    pragma Assert (not Swarm.Report.Overflowed);
    pragma Assert (Braces_Match);
-   Need ("poncelet-report");
+   Need ("hunter-swarm-report");
    Need ("""schema_version"":""v1""");
    Need ("""seeds""");
-   Need ("""world"":1");
-   Need ("""ai"":2");
+   Need ("""grid"":0");
+   Need ("""eater"":1");
+   Need ("""ghosts"":2");
+   Need ("""why_died""");
    Need ("""test_key"":""game-end""");
    Need ("""expected"":""smoke run""");
    Need ("""action_log""");
@@ -104,7 +106,10 @@ begin
       & " ghost" & Swarm.Ghost_X (G, 1)'Image);
 
    pragma Assert (Swarm.API.Set_Param (Swarm.Danger_Radius, 2) = 1);
-   Swarm.API.Start (7, 1);
+   Swarm.API.Start (0, 7, 1);
+   Swarm.Start (G, 1, 3, 1);
+   Swarm.Start (G, 2, 3, 1);
+   pragma Assert (Swarm.Pellets_Left (G) > 0);
    pragma Assert (Swarm.Host_Started);
    pragma Assert (Swarm.API.Do_Tick >= 0);
    Swarm.API.Set_Test_Key (2);

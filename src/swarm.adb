@@ -239,9 +239,20 @@ package body Swarm is
 
    procedure Hostile_Map (G : Game; D : out Dist_Map; Any : out Boolean);
 
+   function Cell_Exits (G : Game; X : X_Pos; Y : Y_Pos) return Natural is
+      N : Natural := 0;
+   begin
+      for K in 0 .. 3 loop
+         if Open (G, Integer (X) + Dirs (K).DX, Integer (Y) + Dirs (K).DY) then
+            N := N + 1;
+         end if;
+      end loop;
+      return N;
+   end Cell_Exits;
+
    procedure Seek_From
      (G : Game; SX, SY : Integer; Mode : Seek_Kind; TX, TY : Integer;
-      Safe : Boolean;
+      Order : Natural; Safe : Boolean; Skip_Pocket : Boolean;
       Found : out Boolean; GX, GY, Dist, Step_X, Step_Y : out Integer)
    is
       D  : Dist_Map;
@@ -293,7 +304,10 @@ package body Swarm is
             then
                Unsafe := True;
             end if;
-            if Is_Goal (G, Mode, CX, CY, TX, TY) and then not Unsafe then
+            if Is_Goal (G, Mode, CX, CY, TX, TY) and then not Unsafe
+              and then not (Skip_Pocket and then Mode = Seek_Food
+                            and then Cell_Exits (G, CX, CY) < 2)
+            then
                Found := True;
                GX := Integer (CX);
                GY := Integer (CY);
@@ -331,7 +345,7 @@ package body Swarm is
             end if;
             for K in 0 .. 3 loop
                declare
-                  Dir : constant Step := Dirs ((K + G.Bias) mod 4);
+                  Dir : constant Step := Dirs ((K + Order) mod 4);
                   NX  : constant Integer := Integer (CX) + Dir.DX;
                   NY  : constant Integer := Integer (CY) + Dir.DY;
                begin
@@ -420,78 +434,6 @@ package body Swarm is
          end;
       end loop;
    end Hostile_Map;
-
-   function Nearest_Hostile (G : Game) return Natural is
-      D : Dist_Map;
-      Any : Boolean;
-   begin
-      Hostile_Map (G, D, Any);
-      if not Any or else D (G.E_X, G.E_Y) = Unseen then
-         return Unseen;
-      end if;
-      return D (G.E_X, G.E_Y);
-   end Nearest_Hostile;
-
-   function Hostile_At (G : Game; X, Y : Integer) return Boolean is
-   begin
-      if G.Power_Left /= 0 then
-         return False;
-      end if;
-      for Id in Ghost_Id loop
-         if G.Ghosts (Id).Mode /= G_Return
-           and then G.Ghosts (Id).Mode /= G_Flee
-           and then Integer (G.Ghosts (Id).X) = X
-           and then Integer (G.Ghosts (Id).Y) = Y
-         then
-            return True;
-         end if;
-      end loop;
-      return False;
-   end Hostile_At;
-
-   procedure Step_Flee (G : Game; NX, NY : out Integer) is
-      D : Dist_Map;
-      Any : Boolean;
-      Here : Natural;
-      Best : Natural;
-      Best_X : Integer := Integer (G.E_X);
-      Best_Y : Integer := Integer (G.E_Y);
-      Have : Boolean := False;
-   begin
-      NX := Integer (G.E_X);
-      NY := Integer (G.E_Y);
-      Hostile_Map (G, D, Any);
-      if not Any or else D (G.E_X, G.E_Y) = Unseen then
-         return;
-      end if;
-      Here := D (G.E_X, G.E_Y);
-      Best := Here;
-      for K in 0 .. 3 loop
-         declare
-            Dir : constant Step := Dirs ((K + G.Bias) mod 4);
-            TX  : constant Integer := Integer (G.E_X) + Dir.DX;
-            TY  : constant Integer := Integer (G.E_Y) + Dir.DY;
-            DD  : Natural;
-         begin
-            if Open (G, TX, TY) and then not Hostile_At (G, TX, TY) then
-               DD := D (X_Pos (TX), Y_Pos (TY));
-               if DD = Unseen then
-                  DD := Unseen - 1;
-               end if;
-               if not Have or else DD > Best then
-                  Have := True;
-                  Best := DD;
-                  Best_X := TX;
-                  Best_Y := TY;
-               end if;
-            end if;
-         end;
-      end loop;
-      if Have and then Best > Here then
-         NX := Best_X;
-         NY := Best_Y;
-      end if;
-   end Step_Flee;
 
    procedure Assign_Cover (G : in out Game) is
       Count : array (1 .. 4) of Natural := [others => 0];
@@ -686,9 +628,34 @@ package body Swarm is
       end if;
    end Eat;
 
+   procedure Note_Death (G : in out Game; By : Ghost_Id) is
+      Bits : Natural := 0;
+      Slot : Natural;
+   begin
+      G.Commit_Left := 0;
+      if G.Death_Count >= Max_Deaths then
+         return;
+      end if;
+      G.Death_Count := G.Death_Count + 1;
+      Slot := G.Death_Count;
+      G.Why (Slot).Tick := G.Tick;
+      G.Why (Slot).Killer := By;
+      G.Why (Slot).Exits :=
+        Cell_Exits (G, G.E_X, G.E_Y);
+      for Id in Ghost_Id loop
+         if abs (Integer (G.Ghosts (Id).X) - Integer (G.E_X))
+           + abs (Integer (G.Ghosts (Id).Y) - Integer (G.E_Y)) <= 2
+         then
+            Bits := Bits + 2 ** (Id - 1);
+         end if;
+      end loop;
+      G.Why (Slot).Near := Bits;
+   end Note_Death;
+
    procedure Kill (G : in out Game; By : Ghost_Id) is
    begin
       pragma Assert (G.Lives > 0);
+      Note_Death (G, By);
       G.Lives := G.Lives - 1;
       G.Deaths := G.Deaths + 1;
       G.Power_Left := 0;
@@ -776,38 +743,316 @@ package body Swarm is
    end Step_Ghost;
 
    procedure Move_Eater (G : in out Game) is
-      HDist : Natural;
+      Order : constant Natural := G.Eater_Bias;
+      Within : Natural := G.Params (Danger_Radius);
+      Pred_X : array (Ghost_Id, 1 .. Lookahead) of Integer;
+      Pred_Y : array (Ghost_Id, 1 .. Lookahead) of Integer;
+
+      function Hostile (Id : Ghost_Id) return Boolean is
+        (G.Ghosts (Id).Mode /= G_Return and then G.Ghosts (Id).Mode /= G_Flee);
+
+      procedure Aim (Id : Ghost_Id; TX, TY : out Integer) is
+      begin
+         if G.Ghosts (Id).Mode = G_Return then
+            TX := Integer (G.Ghosts (Id).Home_X);
+            TY := Integer (G.Ghosts (Id).Home_Y);
+         elsif G.Ghosts (Id).Mode = G_Flee then
+            TX := G.Flee_X (Id);
+            TY := G.Flee_Y (Id);
+         else
+            case Role (G, Id) is
+               when G_Chase =>
+                  TX := Integer (G.E_X);
+                  TY := Integer (G.E_Y);
+               when G_Cutoff =>
+                  Cutoff_Target (G, TX, TY);
+               when G_Cover =>
+                  Cover_Target (G, Id, TX, TY);
+               when G_Flee | G_Return =>
+                  TX := Integer (G.E_X);
+                  TY := Integer (G.E_Y);
+            end case;
+         end if;
+      end Aim;
+
+      procedure Fill_Pred is
+         Already : constant Boolean := G.Power_Left > 0;
+         Stride : constant Integer := G.Params (Ghost_Stride);
+      begin
+         for Id in Ghost_Id loop
+            declare
+               SX : Integer := Integer (G.Ghosts (Id).X);
+               SY : Integer := Integer (G.Ghosts (Id).Y);
+            begin
+               for Step in 1 .. Lookahead loop
+                  declare
+                     Future : Natural;
+                     TX, TY, GX, GY, Dist, NX, NY : Integer;
+                     Found : Boolean;
+                  begin
+                     if Already then
+                        Future := G.Tick + Step;
+                     else
+                        Future := G.Tick + Step - 1;
+                     end if;
+                     if Stride >= 1 and then Future mod Stride = 0
+                       and then Hostile (Id)
+                     then
+                        Aim (Id, TX, TY);
+                        Seek_From
+                          (G, SX, SY, Seek_Cell, TX, TY, G.Bias, False, False,
+                           Found, GX, GY, Dist, NX, NY);
+                        if Found and then Open (G, NX, NY)
+                          and then abs (NX - SX) + abs (NY - SY) = 1
+                        then
+                           SX := NX;
+                           SY := NY;
+                        end if;
+                     end if;
+                     Pred_X (Id, Step) := SX;
+                     Pred_Y (Id, Step) := SY;
+                  end;
+               end loop;
+            end;
+         end loop;
+      end Fill_Pred;
+
+      function Hits (Id : Ghost_Id; X, Y : Integer) return Boolean is
+      begin
+         if not Hostile (Id) then
+            return False;
+         end if;
+         for Step in 1 .. Within loop
+            if Pred_X (Id, Step) = X and then Pred_Y (Id, Step) = Y then
+               return True;
+            end if;
+         end loop;
+         return False;
+      end Hits;
+
+      function Step_Fatal (X, Y : Integer) return Boolean is
+      begin
+         for Id in Ghost_Id loop
+            if Hostile (Id)
+              and then ((Integer (G.Ghosts (Id).X) = X
+                         and then Integer (G.Ghosts (Id).Y) = Y)
+                        or else (Pred_X (Id, 1) = X and then Pred_Y (Id, 1) = Y))
+            then
+               return True;
+            end if;
+         end loop;
+         return False;
+      end Step_Fatal;
+
+      function Reaches_Us return Boolean is
+      begin
+         for Id in Ghost_Id loop
+            if Hits (Id, Integer (G.E_X), Integer (G.E_Y)) then
+               return True;
+            end if;
+         end loop;
+         return False;
+      end Reaches_Us;
+
+      function Safe_Exits return Natural is
+         N : Natural := 0;
+      begin
+         for K in 0 .. 3 loop
+            declare
+               NX : constant Integer := Integer (G.E_X) + Dirs (K).DX;
+               NY : constant Integer := Integer (G.E_Y) + Dirs (K).DY;
+               Threatened : Boolean := False;
+            begin
+               if Open (G, NX, NY) then
+                  for Id in Ghost_Id loop
+                     if Hits (Id, NX, NY) then
+                        Threatened := True;
+                     end if;
+                  end loop;
+                  if not Threatened then
+                     N := N + 1;
+                  end if;
+               end if;
+            end;
+         end loop;
+         return N;
+      end Safe_Exits;
+
+      function Pincer return Boolean is
+         Seen : array (Ghost_Id) of Boolean := [others => False];
+         Ghosts : Natural := 0;
+         Exits : Natural := 0;
+      begin
+         for K in 0 .. 3 loop
+            declare
+               NX : constant Integer := Integer (G.E_X) + Dirs (K).DX;
+               NY : constant Integer := Integer (G.E_Y) + Dirs (K).DY;
+               Hit_Here : Boolean := False;
+            begin
+               if Open (G, NX, NY) then
+                  for Id in Ghost_Id loop
+                     if Hits (Id, NX, NY) then
+                        Hit_Here := True;
+                        if not Seen (Id) then
+                           Seen (Id) := True;
+                           Ghosts := Ghosts + 1;
+                        end if;
+                     end if;
+                  end loop;
+                  if Hit_Here then
+                     Exits := Exits + 1;
+                  end if;
+               end if;
+            end;
+         end loop;
+         return Ghosts >= 2 and then Exits >= 2;
+      end Pincer;
+
+      procedure Escape_Target (SX, SY, TX, TY : out Integer) is
+         Best : Integer := -1;
+         DX : Integer := 0;
+         DY : Integer := 0;
+      begin
+         SX := Integer (G.E_X);
+         SY := Integer (G.E_Y);
+         TX := SX;
+         TY := SY;
+         for K in 0 .. 3 loop
+            declare
+               Dir : constant Step := Dirs ((K + Order) mod 4);
+               NX : constant Integer := Integer (G.E_X) + Dir.DX;
+               NY : constant Integer := Integer (G.E_Y) + Dir.DY;
+               Score : Integer := Lookahead + 1;
+            begin
+               if Open (G, NX, NY) then
+                  for Step in 1 .. Lookahead loop
+                     for Id in Ghost_Id loop
+                        if Hostile (Id)
+                          and then Pred_X (Id, Step) = NX
+                          and then Pred_Y (Id, Step) = NY
+                          and then Step < Score
+                        then
+                           Score := Step;
+                        end if;
+                     end loop;
+                  end loop;
+                  if Score > Best then
+                     Best := Score;
+                     SX := NX;
+                     SY := NY;
+                     DX := Dir.DX;
+                     DY := Dir.DY;
+                  end if;
+               end if;
+            end;
+         end loop;
+         declare
+            CX : Integer := Integer (G.E_X);
+            CY : Integer := Integer (G.E_Y);
+         begin
+            for Step in 1 .. Lookahead loop
+               declare
+                  NX : constant Integer := CX + DX;
+                  NY : constant Integer := CY + DY;
+               begin
+                  exit when not Open (G, NX, NY);
+                  CX := NX;
+                  CY := NY;
+               end;
+            end loop;
+            TX := CX;
+            TY := CY;
+         end;
+      end Escape_Target;
+
+      procedure Find_Food
+        (Have : out Boolean; FX, FY, FD, SX, SY : out Integer)
+      is
+      begin
+         Seek_From
+           (G, Integer (G.E_X), Integer (G.E_Y), Seek_Food, 0, 0,
+            Order, True, True, Have, FX, FY, FD, SX, SY);
+         if not Have then
+            Seek_From
+              (G, Integer (G.E_X), Integer (G.E_Y), Seek_Food, 0, 0,
+               Order, True, False, Have, FX, FY, FD, SX, SY);
+         end if;
+         if not Have then
+            Seek_From
+              (G, Integer (G.E_X), Integer (G.E_Y), Seek_Food, 0, 0,
+               Order, False, True, Have, FX, FY, FD, SX, SY);
+         end if;
+         if not Have then
+            Seek_From
+              (G, Integer (G.E_X), Integer (G.E_Y), Seek_Food, 0, 0,
+               Order, False, False, Have, FX, FY, FD, SX, SY);
+         end if;
+      end Find_Food;
+
+      procedure Finish
+        (Code : Decision_Code; TX, TY, SX, SY : Integer; Hold : Natural)
+      is
+      begin
+         Note_Choice (G, G.E_Last, 0, Code, TX, TY);
+         Step_Eater (G, SX, SY);
+         if Hold > 1 then
+            G.Commit_Code := Code;
+            G.Commit_X := TX;
+            G.Commit_Y := TY;
+            G.Commit_Left := Hold - 1;
+         else
+            G.Commit_Left := 0;
+         end if;
+         if G.Outcome = Running then
+            Eat (G);
+         end if;
+         if G.Outcome = Running then
+            Resolve (G);
+         end if;
+      end Finish;
+
       Have_Food, Have_Power, Have_Hunt : Boolean;
       Food_D, Power_D, Hunt_D : Integer;
       Food_X, Food_Y, Power_X, Power_Y, Hunt_X, Hunt_Y : Integer;
       Food_SX, Food_SY, Power_SX, Power_SY, Hunt_SX, Hunt_SY : Integer;
-      Step_X, Step_Y : Integer;
-      Code : Decision_Code := Seek_Pellet;
-      Target_X : Integer := Integer (G.E_X);
-      Target_Y : Integer := Integer (G.E_Y);
+      Esc_SX, Esc_SY, Esc_TX, Esc_TY : Integer;
    begin
       if G.Outcome /= Running then
          return;
       end if;
-      HDist := Nearest_Hostile (G);
-      Seek_From
-        (G, Integer (G.E_X), Integer (G.E_Y), Seek_Food, 0, 0, True,
-         Have_Food, Food_X, Food_Y, Food_D, Food_SX, Food_SY);
-      if not Have_Food then
-         Seek_From
-           (G, Integer (G.E_X), Integer (G.E_Y), Seek_Food, 0, 0, False,
-            Have_Food, Food_X, Food_Y, Food_D, Food_SX, Food_SY);
+      if Within > Lookahead then
+         Within := Lookahead;
       end if;
+      if Within < 1 then
+         Within := 1;
+      end if;
+      Fill_Pred;
+      if G.Commit_Left > 0 then
+         declare
+            Found : Boolean;
+            GX, GY, Dist, SX, SY : Integer;
+         begin
+            Seek_From
+              (G, Integer (G.E_X), Integer (G.E_Y), Seek_Cell,
+               G.Commit_X, G.Commit_Y, Order, False, False,
+               Found, GX, GY, Dist, SX, SY);
+            if Found and then not Step_Fatal (SX, SY)
+              and then (SX /= Integer (G.E_X) or else SY /= Integer (G.E_Y))
+            then
+               Finish (G.Commit_Code, G.Commit_X, G.Commit_Y, SX, SY, G.Commit_Left);
+               return;
+            end if;
+            G.Commit_Left := 0;
+         end;
+      end if;
+      Find_Food (Have_Food, Food_X, Food_Y, Food_D, Food_SX, Food_SY);
       Seek_From
-        (G, Integer (G.E_X), Integer (G.E_Y), Seek_Power, 0, 0, True,
+        (G, Integer (G.E_X), Integer (G.E_Y), Seek_Power, 0, 0,
+         Order, False, False,
          Have_Power, Power_X, Power_Y, Power_D, Power_SX, Power_SY);
-      if not Have_Power then
-         Seek_From
-           (G, Integer (G.E_X), Integer (G.E_Y), Seek_Power, 0, 0, False,
-            Have_Power, Power_X, Power_Y, Power_D, Power_SX, Power_SY);
-      end if;
       Seek_From
-        (G, Integer (G.E_X), Integer (G.E_Y), Seek_Fright, 0, 0, False,
+        (G, Integer (G.E_X), Integer (G.E_Y), Seek_Fright, 0, 0,
+         Order, False, False,
          Have_Hunt, Hunt_X, Hunt_Y, Hunt_D, Hunt_SX, Hunt_SY);
       if G.Power_Left > 0 and then Have_Hunt
         and then Hunt_D <= G.Params (Hunt_Range)
@@ -815,43 +1060,26 @@ package body Swarm is
         and then G.Ticks_Since_Eat < G.Params (Starve_Ticks)
         and then (not Have_Food or else Hunt_D < Food_D)
       then
-         Code := Hunt;
-         Target_X := Hunt_X;
-         Target_Y := Hunt_Y;
-         Step_X := Hunt_SX;
-         Step_Y := Hunt_SY;
-      elsif HDist <= G.Params (Danger_Radius)
-        and then G.Ticks_Since_Eat < G.Params (Starve_Ticks)
+         Finish (Hunt, Hunt_X, Hunt_Y, Hunt_SX, Hunt_SY, 0);
+      elsif G.Power_Left = 0
+        and then (Pincer or else Reaches_Us or else Safe_Exits = 0)
       then
-         Code := Flee;
-         Step_Flee (G, Step_X, Step_Y);
-         Target_X := Step_X;
-         Target_Y := Step_Y;
-      elsif Have_Power and then HDist <= G.Params (Threat_Range)
+         if Have_Power then
+            Finish (Seek_Power, Power_X, Power_Y, Power_SX, Power_SY, Commit_Ticks);
+         else
+            Escape_Target (Esc_SX, Esc_SY, Esc_TX, Esc_TY);
+            Finish (Flee, Esc_TX, Esc_TY, Esc_SX, Esc_SY, Commit_Ticks);
+         end if;
+      elsif G.Power_Left = 0 and then Have_Power
         and then Power_D <= G.Params (Power_Seek)
+        and then (Reaches_Us or else Safe_Exits < Cell_Exits (G, G.E_X, G.E_Y))
       then
-         Code := Seek_Power;
-         Target_X := Power_X;
-         Target_Y := Power_Y;
-         Step_X := Power_SX;
-         Step_Y := Power_SY;
+         Finish (Seek_Power, Power_X, Power_Y, Power_SX, Power_SY, Commit_Ticks);
       elsif Have_Food then
-         Code := Seek_Pellet;
-         Target_X := Food_X;
-         Target_Y := Food_Y;
-         Step_X := Food_SX;
-         Step_Y := Food_SY;
+         Finish (Seek_Pellet, Food_X, Food_Y, Food_SX, Food_SY, 0);
       else
-         Step_X := Integer (G.E_X);
-         Step_Y := Integer (G.E_Y);
-      end if;
-      Note_Choice (G, G.E_Last, 0, Code, Target_X, Target_Y);
-      Step_Eater (G, Step_X, Step_Y);
-      if G.Outcome = Running then
-         Eat (G);
-      end if;
-      if G.Outcome = Running then
-         Resolve (G);
+         Finish (Seek_Pellet, Integer (G.E_X), Integer (G.E_Y),
+                 Integer (G.E_X), Integer (G.E_Y), 0);
       end if;
    end Move_Eater;
 
@@ -907,7 +1135,8 @@ package body Swarm is
       end if;
       Seek_From
         (G, Integer (G.Ghosts (Id).X), Integer (G.Ghosts (Id).Y),
-         Seek_Cell, TX, TY, False, Found, GX, GY, Dist, SX, SY);
+         Seek_Cell, TX, TY, G.Bias, False, False,
+         Found, GX, GY, Dist, SX, SY);
       if not Found then
          SX := Integer (G.Ghosts (Id).X);
          SY := Integer (G.Ghosts (Id).Y);
@@ -1011,45 +1240,8 @@ package body Swarm is
       OK := True;
    end Set_Param;
 
-   procedure Start
-     (G : in out Game; World_Seed, AI_Seed : Interfaces.Unsigned_32)
-   is
-      type Point is record
-         X : X_Pos;
-         Y : Y_Pos;
-      end record;
-      Floors : array (0 .. Width * Height - 1) of Point;
-      Floor_Count : Natural := 0;
-      Used : array (X_Pos, Y_Pos) of Boolean := [others => [others => False]];
-      Corners : constant array (1 .. 4) of Point :=
-        [1 => (X => 0, Y => 0),
-         2 => (X => Width - 1, Y => 0),
-         3 => (X => 0, Y => Height - 1),
-         4 => (X => Width - 1, Y => Height - 1)];
+   procedure Paint_Hand (G : in out Game) is
    begin
-      Ensure (G);
-      G.Started := False;
-      G.World_Seed := World_Seed;
-      G.AI_Seed := AI_Seed;
-      G.Bias := Natural (AI_Seed mod 4);
-      G.Tick := 0;
-      G.Score := 0;
-      G.Lives := 0;
-      G.Deaths := 0;
-      G.Catches := 0;
-      G.Pellets := 0;
-      G.Power_Left := 0;
-      G.Chain := 0;
-      G.Ticks_Since_Eat := 0;
-      G.Ate := False;
-      G.Respawn_Pause := 0;
-      G.Outcome := Running;
-      G.Role_Timer := 0;
-      G.Error_Used := False;
-      G.Error_Line := 0;
-      G.E_DX := 1;
-      G.E_DY := 0;
-      Clear_Logs (G);
       for Y in Y_Pos loop
          for X in X_Pos loop
             declare
@@ -1068,6 +1260,207 @@ package body Swarm is
             end;
          end loop;
       end loop;
+   end Paint_Hand;
+
+   procedure Paint_Generated (G : in out Game; Seed : Interfaces.Unsigned_32) is
+      Room_Cols : constant := 9;
+      Room_Rows : constant := 10;
+      Room_N : constant := Room_Cols * Room_Rows;
+      Max_Edges : constant := 200;
+      type Edge is record
+         A, B : Natural;
+         MX, MY : Natural;
+      end record;
+      type Edge_List is array (0 .. Max_Edges - 1) of Edge;
+      Edges : Edge_List;
+      Carved : array (0 .. Max_Edges - 1) of Boolean := [others => False];
+      Parent : array (0 .. Room_N - 1) of Natural;
+      Edge_Count : Natural := 0;
+      Rng : Interfaces.Unsigned_32 := Seed;
+
+      procedure Next is
+      begin
+         Rng := Rng * 1664525 + 1013904223;
+      end Next;
+
+      function Find (Start : Natural) return Natural is
+         Y : Natural := Start;
+      begin
+         while Parent (Y) /= Y loop
+            Parent (Y) := Parent (Parent (Y));
+            Y := Parent (Y);
+         end loop;
+         return Y;
+      end Find;
+
+      procedure Make_Floor (X, Y : Natural) is
+      begin
+         pragma Assert (X <= Natural (X_Pos'Last));
+         pragma Assert (Y <= Natural (Y_Pos'Last));
+         G.Tiles (X_Pos (X), Y_Pos (Y)) :=
+           (Kind => Floor, Pellet => True, Power => False);
+      end Make_Floor;
+
+      function Room_X (I : Natural) return Natural is
+        (1 + (I mod Room_Cols) * 2);
+
+      function Room_Y (I : Natural) return Natural is
+        (1 + (I / Room_Cols) * 2);
+   begin
+      pragma Assert (Seed /= 0);
+      for Y in Y_Pos loop
+         for X in X_Pos loop
+            G.Tiles (X, Y) := (Kind => Wall, Pellet => False, Power => False);
+         end loop;
+      end loop;
+      for I in 0 .. Room_N - 1 loop
+         Parent (I) := I;
+         Make_Floor (Room_X (I), Room_Y (I));
+      end loop;
+      for R in 0 .. Room_N - 1 loop
+         declare
+            X : constant Natural := Room_X (R);
+            Y : constant Natural := Room_Y (R);
+         begin
+            if X + 2 < Width then
+               pragma Assert (Edge_Count < Max_Edges);
+               Edges (Edge_Count) := (A => R, B => R + 1, MX => X + 1, MY => Y);
+               Edge_Count := Edge_Count + 1;
+            end if;
+            if Y + 2 < Height then
+               pragma Assert (Edge_Count < Max_Edges);
+               Edges (Edge_Count) :=
+                 (A => R, B => R + Room_Cols, MX => X, MY => Y + 1);
+               Edge_Count := Edge_Count + 1;
+            end if;
+         end;
+      end loop;
+      if Edge_Count > 1 then
+         for I in reverse 1 .. Edge_Count - 1 loop
+            declare
+               J : Natural;
+               Tmp : Edge;
+            begin
+               Next;
+               J := Natural (Rng mod Interfaces.Unsigned_32 (I + 1));
+               Tmp := Edges (I);
+               Edges (I) := Edges (J);
+               Edges (J) := Tmp;
+            end;
+         end loop;
+      end if;
+      for I in 0 .. Edge_Count - 1 loop
+         declare
+            FA : constant Natural := Find (Edges (I).A);
+            FB : constant Natural := Find (Edges (I).B);
+         begin
+            if FA /= FB then
+               Parent (FA) := FB;
+               Make_Floor (Edges (I).MX, Edges (I).MY);
+               Carved (I) := True;
+            end if;
+         end;
+      end loop;
+      for I in 0 .. Edge_Count - 1 loop
+         if not Carved (I) then
+            Next;
+            if Rng mod 5 = 0 then
+               Make_Floor (Edges (I).MX, Edges (I).MY);
+            end if;
+         end if;
+      end loop;
+      for Q in 1 .. 4 loop
+         declare
+            CX : constant Integer := (if Q mod 2 = 1 then 4 else 14);
+            CY : constant Integer := (if Q <= 2 then 5 else 15);
+            Best : Natural := Natural'Last;
+            BX : X_Pos := 1;
+            BY : Y_Pos := 1;
+            Found : Boolean := False;
+         begin
+            for Y in Y_Pos loop
+               for X in X_Pos loop
+                  if G.Tiles (X, Y).Kind = Floor and then not G.Tiles (X, Y).Power
+                  then
+                     declare
+                        In_Q : constant Boolean :=
+                          (Q = 1 and then Integer (X) < Width / 2
+                           and then Integer (Y) < Height / 2)
+                          or else (Q = 2 and then Integer (X) >= Width / 2
+                                   and then Integer (Y) < Height / 2)
+                          or else (Q = 3 and then Integer (X) < Width / 2
+                                   and then Integer (Y) >= Height / 2)
+                          or else (Q = 4 and then Integer (X) >= Width / 2
+                                   and then Integer (Y) >= Height / 2);
+                        D : constant Natural :=
+                          abs (Integer (X) - CX) + abs (Integer (Y) - CY);
+                     begin
+                        if In_Q and then D < Best then
+                           Best := D;
+                           BX := X;
+                           BY := Y;
+                           Found := True;
+                        end if;
+                     end;
+                  end if;
+               end loop;
+            end loop;
+            if Found then
+               G.Tiles (BX, BY).Power := True;
+               G.Tiles (BX, BY).Pellet := False;
+            end if;
+         end;
+      end loop;
+   end Paint_Generated;
+
+   procedure Start
+     (G : in out Game; Grid_Seed, Eater_Seed, Ghost_Seed : Interfaces.Unsigned_32)
+   is
+      type Point is record
+         X : X_Pos;
+         Y : Y_Pos;
+      end record;
+      Floors : array (0 .. Width * Height - 1) of Point;
+      Floor_Count : Natural := 0;
+      Used : array (X_Pos, Y_Pos) of Boolean := [others => [others => False]];
+      Corners : constant array (1 .. 4) of Point :=
+        [1 => (X => 0, Y => 0),
+         2 => (X => Width - 1, Y => 0),
+         3 => (X => 0, Y => Height - 1),
+         4 => (X => Width - 1, Y => Height - 1)];
+   begin
+      Ensure (G);
+      G.Started := False;
+      G.Grid_Seed := Grid_Seed;
+      G.Eater_Seed := Eater_Seed;
+      G.Ghost_Seed := Ghost_Seed;
+      G.Bias := Natural (Ghost_Seed mod 4);
+      G.Eater_Bias := Natural (Eater_Seed mod 4);
+      G.Commit_Left := 0;
+      G.Death_Count := 0;
+      G.Tick := 0;
+      G.Score := 0;
+      G.Lives := 0;
+      G.Deaths := 0;
+      G.Catches := 0;
+      G.Pellets := 0;
+      G.Power_Left := 0;
+      G.Chain := 0;
+      G.Ticks_Since_Eat := 0;
+      G.Ate := False;
+      G.Respawn_Pause := 0;
+      G.Outcome := Running;
+      G.Role_Timer := 0;
+      G.Error_Used := False;
+      G.Error_Line := 0;
+      G.E_DX := 1;
+      G.E_DY := 0;
+      Clear_Logs (G);
+      if Grid_Seed = 0 then
+         Paint_Hand (G);
+      else
+         Paint_Generated (G, Grid_Seed);
+      end if;
       for Y in Y_Pos loop
          for X in X_Pos loop
             if G.Tiles (X, Y).Kind = Floor then
@@ -1113,7 +1506,8 @@ package body Swarm is
          end;
       end loop;
       declare
-         Index : Natural := Natural (World_Seed mod Interfaces.Unsigned_32 (Floor_Count));
+         Index : Natural :=
+           Natural (Eater_Seed mod Interfaces.Unsigned_32 (Floor_Count));
          Chosen : Boolean := False;
       begin
          for Attempt in 1 .. Floor_Count loop
@@ -1314,9 +1708,11 @@ package body Swarm is
       if not G.Started then
          return 0;
       end if;
-      Mix (G.World_Seed);
-      Mix (G.AI_Seed);
+      Mix (G.Grid_Seed);
+      Mix (G.Eater_Seed);
+      Mix (G.Ghost_Seed);
       Mix (Interfaces.Unsigned_32 (G.Bias));
+      Mix (Interfaces.Unsigned_32 (G.Eater_Bias));
       Mix (Interfaces.Unsigned_32 (G.Tick));
       Mix (Interfaces.Unsigned_32 (G.Score));
       Mix (Interfaces.Unsigned_32 (G.Lives));

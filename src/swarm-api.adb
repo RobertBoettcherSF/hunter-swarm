@@ -28,9 +28,9 @@ package body Swarm.API is
       end if;
    end Set_Param;
 
-   procedure Start (World_Seed, AI_Seed : Interfaces.Unsigned_32) is
+   procedure Start (Grid_Seed, Eater_Seed, Ghost_Seed : Interfaces.Unsigned_32) is
    begin
-      Swarm.Start (The_Game, World_Seed, AI_Seed);
+      Swarm.Start (The_Game, Grid_Seed, Eater_Seed, Ghost_Seed);
    end Start;
 
    function Do_Tick return Integer is

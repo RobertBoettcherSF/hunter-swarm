@@ -39,8 +39,12 @@ package Swarm is
      (G : in out Game; Index : Integer; Value : Integer; OK : out Boolean)
    with Post => (if OK then Param (G, Index) = Value);
 
+   -- Grid 0 is the fixed hand-made maze. Any other grid seed builds a maze.
+   -- Eater seed picks the opening cell and the eater's tie-break.
+   -- Ghost seed picks the ghost roles. The ghost rules do not read the eater seed.
    procedure Start
-     (G : in out Game; World_Seed, AI_Seed : Interfaces.Unsigned_32)
+     (G : in out Game;
+      Grid_Seed, Eater_Seed, Ghost_Seed : Interfaces.Unsigned_32)
    with Post =>
      Started (G) and then Outcome (G) = Running
      and then Pellets_Left (G) > 0 and then Lives (G) = 5
@@ -98,6 +102,9 @@ private
    Tick_Cap            : constant := 4000;
    Log_Gap             : constant := 25;
    Score_Limit         : constant := 10_000_000;
+   Lookahead           : constant := 4;
+   Commit_Ticks        : constant := 6;
+   Max_Deaths          : constant := 8;
 
    type Tile_Kind is (Wall, Floor);
 
@@ -139,6 +146,14 @@ private
       B    : Integer := 0;
    end record;
 
+   type Death_Note is record
+      Tick   : Natural := 0;
+      Killer : Natural := 0;
+      Near   : Natural := 0;
+      Exits  : Natural := 0;
+   end record;
+   type Death_List is array (1 .. Max_Deaths) of Death_Note;
+
    type Param_Array is array (Param_Index) of Integer;
    type Ghost_Array is array (Ghost_Id) of Ghost;
    type Corner_Array is array (Ghost_Id) of Integer;
@@ -151,9 +166,17 @@ private
       Defaults_Ready : Boolean := False;
       Started        : Boolean := False;
       Params         : Param_Array := [others => 0];
-      World_Seed     : Interfaces.Unsigned_32 := 0;
-      AI_Seed        : Interfaces.Unsigned_32 := 0;
+      Grid_Seed      : Interfaces.Unsigned_32 := 0;
+      Eater_Seed     : Interfaces.Unsigned_32 := 0;
+      Ghost_Seed     : Interfaces.Unsigned_32 := 0;
       Bias           : Natural := 0;
+      Eater_Bias     : Natural := 0;
+      Commit_Left    : Natural := 0;
+      Commit_X       : Integer := 0;
+      Commit_Y       : Integer := 0;
+      Commit_Code    : Decision_Code := None;
+      Death_Count    : Natural := 0;
+      Why            : Death_List := [others => <>];
       Tick           : Natural := 0;
       Score          : Natural := 0;
       Lives          : Natural := 0;

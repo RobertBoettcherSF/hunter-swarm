@@ -1,4 +1,4 @@
--- poncelet-report v1, written into one fixed buffer. The host reads it back
+-- hunter-swarm-report v1, written into one fixed buffer. The host reads it back
 -- a byte at a time. custom holds the side-specific tuning fields (D-017).
 
 package Swarm.Report is

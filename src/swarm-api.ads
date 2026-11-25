@@ -26,7 +26,7 @@ package Swarm.API is
    function Set_Param (Index, Value : Integer) return Integer
    with Export, Convention => C, External_Name => "hs_set_param";
 
-   procedure Start (World_Seed, AI_Seed : Interfaces.Unsigned_32)
+   procedure Start (Grid_Seed, Eater_Seed, Ghost_Seed : Interfaces.Unsigned_32)
    with Export, Convention => C, External_Name => "hs_start";
 
    function Do_Tick return Integer
