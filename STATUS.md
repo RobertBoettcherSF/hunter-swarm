@@ -4,7 +4,7 @@
 - Live: none yet (the repository stays private; Pages is wired but not enabled)
 - Test: none yet (private repo; githack cannot serve it). Local: open `docs/index.html` after `./build.sh`. The stamp in that file matches `docs/version.txt`.
 - What: self-playing maze chase. Rules and both AIs are plain Ada compiled to WebAssembly. The page draws, takes buttons, and downloads reports.
-- Status (2026-11-25): round 2. Eater commits to an escape, predicts ghost paths, and uses a power pellet when cornered. Ghost rules are unchanged. Grid seed 0 is the hand-made maze; any other grid seed builds one. Stamp is the string in `version.txt` (v0.2).
+- Status (2026-11-25): round 2. Eater commits to an escape, predicts ghost paths, and uses a power pellet when cornered. Ghost rules are unchanged. Grid seed 0 is the hand-made maze; any other grid seed builds one. Stamp `v0.2 b20261125-1111 c89172c`.
 - SPARK: not started (D-008). No proof run.
 - Gap: none recorded against D-005, D-007, D-025, or D-027. Wasm checks are off on purpose (D-027); `./run-tests.sh` runs the contracts.
 - Next: none agreed. Open questions are below.
