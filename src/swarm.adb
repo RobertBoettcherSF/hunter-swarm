@@ -234,10 +234,33 @@ package body Swarm is
       end if;
    end Pace;
 
+   function Level_Fright (G : Game) return Integer is
+      Cut : constant Integer := 2 * (Integer (G.Level_No) - 1);
+      Left : Integer := G.Params (Fright_Ticks) - Cut;
+   begin
+      if Left < 8 then
+         Left := 8;
+      end if;
+      return Left;
+   end Level_Fright;
+
+   function Level_Haste (G : Game) return Integer is
+      Gap : Integer := 16 - 2 * (Integer (G.Level_No) - 1);
+   begin
+      if Gap < 4 then
+         Gap := 4;
+      end if;
+      return Gap;
+   end Level_Haste;
+
+   function Level_Weight (G : Game) return Integer is
+     (100 + 8 * (Integer (G.Level_No) - 1));
+
    function Ghost_Steps
      (G : Game; Id : Ghost_Id; At_Tick : Natural; X, Y : Integer) return Boolean
    is
       Step : Integer := Pace (G, At_Tick);
+      Due : Boolean;
    begin
       if G.Ghosts (Id).Waiting and then At_Tick < G.Ghosts (Id).Release then
          return False;
@@ -245,13 +268,15 @@ package body Swarm is
       if Step < 1 then
          Step := 1;
       end if;
-      if At_Tick mod Natural (Step) /= 0 then
-         return False;
+      -- Tunnels stay at half pace. Elsewhere, later levels add a few extra steps.
+      if In_Tunnel (X, Y) then
+         return At_Tick mod Natural (Step * 2) = 0;
       end if;
-      if In_Tunnel (X, Y) and then At_Tick mod Natural (Step * 2) /= 0 then
-         return False;
+      Due := At_Tick mod Natural (Step) = 0;
+      if G.Level_No > 1 and then At_Tick mod Natural (Level_Haste (G)) = 0 then
+         Due := True;
       end if;
-      return True;
+      return Due;
    end Ghost_Steps;
 
    -- True when the corridor ahead has no junction, no loop, and no tunnel.
@@ -887,11 +912,11 @@ package body Swarm is
    begin
       if G.Tiles (G.E_X, G.E_Y).Power then
          G.Tiles (G.E_X, G.E_Y).Power := False;
-         pragma Assert (G.Pellets > 0);
-         G.Pellets := G.Pellets - 1;
          Add_Score (G, Power_Points);
          G.Ate := True;
-         G.Power_Left := G.Params (Fright_Ticks);
+         G.Power_Left := Level_Fright (G);
+         pragma Assert (G.Powers > 0);
+         G.Powers := G.Powers - 1;
          G.Chain := 0;
          Assign_Flee (G);
          for Id in Ghost_Id loop
@@ -1175,6 +1200,65 @@ package body Swarm is
          end if;
       end loop;
    end Draw_Step;
+
+   procedure Nearest_Escape
+     (G : Game; SX, SY : Integer;
+      Found : out Boolean; GX, GY, Dist : out Integer)
+   is
+      Seen : array (X_Pos, Y_Pos) of Boolean := [others => [others => False]];
+      DD : array (X_Pos, Y_Pos) of Natural := [others => [others => 0]];
+      QX : array (0 .. Width * Height - 1) of Integer;
+      QY : array (0 .. Width * Height - 1) of Integer;
+      Head, Tail : Natural := 0;
+   begin
+      Found := False;
+      GX := SX;
+      GY := SY;
+      Dist := 0;
+      if not Open (G, SX, SY) then
+         return;
+      end if;
+      Seen (X_Pos (SX), Y_Pos (SY)) := True;
+      QX (0) := SX;
+      QY (0) := SY;
+      Tail := 1;
+      while Head /= Tail loop
+         declare
+            CX : constant Integer := QX (Head);
+            CY : constant Integer := QY (Head);
+            CD : constant Natural := DD (X_Pos (CX), Y_Pos (CY));
+         begin
+            Head := Head + 1;
+            if CD > 0 and then
+              (In_Tunnel (CX, CY) or else Power_At (G, CX, CY)
+               or else Egress (G, CX, CY) >= 3)
+            then
+               Found := True;
+               GX := CX;
+               GY := CY;
+               Dist := Integer (CD);
+               return;
+            end if;
+            for K in 0 .. 3 loop
+               declare
+                  NX, NY : Integer;
+               begin
+                  if Try_Walk
+                    (G, CX, CY, Dirs (K).DX, Dirs (K).DY, False, NX, NY)
+                    and then not Seen (X_Pos (NX), Y_Pos (NY))
+                  then
+                     Seen (X_Pos (NX), Y_Pos (NY)) := True;
+                     DD (X_Pos (NX), Y_Pos (NY)) := CD + 1;
+                     pragma Assert (Tail < QX'Length);
+                     QX (Tail) := NX;
+                     QY (Tail) := NY;
+                     Tail := Tail + 1;
+                  end if;
+               end;
+            end loop;
+         end;
+      end loop;
+   end Nearest_Escape;
 
    function Approach_Side (EX, EY, X, Y : Integer) return Integer is
       DX : constant Integer := X - EX;
@@ -1517,9 +1601,12 @@ package body Swarm is
          Have_Here, Have_Pow, Have_Fright, Have_Next : Boolean;
          HX, HY, HD, HSX, HSY : Integer;
          NX_Food, NY_Food, ND, NSX, NSY : Integer;
-         Cornered, Pull_Power : Boolean;
+         Cornered, Pull_Power, Pincer_Early : Boolean;
          Threat : Dist_Map;
          Any_Ghost : Boolean;
+         West, East, North, South : Boolean := False;
+         Esc_Found : Boolean;
+         Esc_X, Esc_Y, Esc_D : Integer;
          Code : Decision_Code := Seek_Pellet;
          UX, UY : Integer;
          Took : Boolean;
@@ -1555,6 +1642,35 @@ package body Swarm is
          Pull_Power := Have_Pow and then
            (not Have_Here
             or else (Ghost_D <= G.Params (Threat_Range) and then Power_Here < Ghost_D));
+         for Id in Ghost_Id loop
+            if Hostile (Id)
+              and then Span
+                (Integer (G.Ghosts (Id).X), Integer (G.Ghosts (Id).Y),
+                 Integer (G.E_X), Integer (G.E_Y)) <= 8
+            then
+               case Approach_Side
+                 (Integer (G.E_X), Integer (G.E_Y),
+                  Integer (G.Ghosts (Id).X), Integer (G.Ghosts (Id).Y))
+               is
+                  when 0 => West := True;
+                  when 1 => East := True;
+                  when 2 => North := True;
+                  when 3 => South := True;
+                  when others => null;
+               end case;
+            end if;
+         end loop;
+         Pincer_Early := (West and East) or else (North and South);
+         if Pincer_Early then
+            Nearest_Escape
+              (G, Integer (G.E_X), Integer (G.E_Y),
+               Esc_Found, Esc_X, Esc_Y, Esc_D);
+         else
+            Esc_Found := False;
+            Esc_X := Integer (G.E_X);
+            Esc_Y := Integer (G.E_Y);
+            Esc_D := 0;
+         end if;
          for K in 0 .. 3 loop
             declare
                NX, NY : Integer;
@@ -1619,6 +1735,15 @@ package body Swarm is
                         if not Have_Here then
                            Score := Score + Food_Pull / 2;
                         end if;
+                     end if;
+                  end if;
+                  if Pincer_Early and then Esc_Found then
+                     Seek_From
+                       (G, NX, NY, Seek_Cell, Esc_X, Esc_Y,
+                        Order, False, False, False, False, False,
+                        Have_Next, NX_Food, NY_Food, ND, NSX, NSY);
+                     if Have_Next and then ND + 1 = Esc_D then
+                        Score := Score + Food_Pull + 80;
                      end if;
                   end if;
                   if G.Power_Left > 0 and then Have_Fright
@@ -1769,9 +1894,23 @@ package body Swarm is
          Near : Natural := 0;
          Hunting : constant Boolean :=
            G.Ghosts (Id).Mode /= G_Return and then G.Ghosts (Id).Mode /= G_Flee;
+         Boost : constant Integer := Level_Weight (G);
          UX, UY : Integer;
          Took : Boolean;
+         Hold : Boolean := False;
+         Here : constant Integer :=
+           Span (Integer (G.Ghosts (Id).X), Integer (G.Ghosts (Id).Y),
+                 Integer (G.E_X), Integer (G.E_Y));
+         Pow_Have : Boolean;
+         PX, PY, PD, PSX, PSY : Integer;
       begin
+         if G.Power_Left = 0 and then Hunting then
+            Seek_From
+              (G, Integer (G.E_X), Integer (G.E_Y), Seek_Power, 0, 0,
+               G.Bias, False, False, False, False, True,
+               Pow_Have, PX, PY, PD, PSX, PSY);
+            Hold := Pow_Have and then PD <= 6;
+         end if;
          if Hunting then
             for Other in Ghost_Id loop
                if G.Ghosts (Other).Mode /= G_Return
@@ -1803,16 +1942,41 @@ package body Swarm is
                      False, False, False, False, True,
                      Found, GX, GY, Dist, SX, SY);
                   if Found and then Dist < 24 then
-                     Score := Score + W_Close * (24 - Dist);
+                     Score := Score + (W_Close * Boost / 100) * (24 - Dist);
                   end if;
                   if Hunting and then Span (NX, NY, Integer (G.E_X), Integer (G.E_Y)) = 0
                   then
-                     Score := Score + W_Block * 6;
+                     Score := Score + (W_Block * Boost / 100) * 6;
                   elsif Hunting
                     and then Span (NX, NY, Integer (G.E_X), Integer (G.E_Y)) = 1
                   then
-                     Score := Score + W_Block * 2;
+                     Score := Score + (W_Block * Boost / 100) * 2;
                   end if;
+                  declare
+                     Next_D : constant Integer :=
+                       Span (NX, NY, Integer (G.E_X), Integer (G.E_Y));
+                  begin
+                     if Hold then
+                        if Next_D < Here then
+                           Score := Score - 140;
+                        else
+                           Score := Score + 40;
+                        end if;
+                        if Next_D < 4 then
+                           Score := Score - 60;
+                        end if;
+                     end if;
+                     if G.Power_Left > 0 then
+                        if Next_D < Here then
+                           Score := Score - 80;
+                        else
+                           Score := Score + 50;
+                        end if;
+                        if Next_D <= 2 then
+                           Score := Score - 160;
+                        end if;
+                     end if;
+                  end;
                   for Other in Ghost_Id loop
                      if Other /= Id then
                         declare
@@ -1823,6 +1987,9 @@ package body Swarm is
                         begin
                            if Gap < 5 then
                               Score := Score - W_Spread * (5 - Gap);
+                           end if;
+                           if G.Power_Left > 0 and then Gap < 6 then
+                              Score := Score - W_Spread * 2;
                            end if;
                         end;
                      end if;
@@ -2406,6 +2573,7 @@ package body Swarm is
       G.Death_Count := 0;
       G.Tick := 0;
       G.Pellets := 0;
+      G.Powers := 0;
       G.Power_Left := 0;
       G.Chain := 0;
       G.Ticks_Since_Eat := 0;
@@ -2501,13 +2669,14 @@ package body Swarm is
       end loop;
       for Y in Y_Pos loop
          for X in X_Pos loop
-            if G.Tiles (X, Y).Pellet or else G.Tiles (X, Y).Power then
+            if G.Tiles (X, Y).Pellet then
                G.Pellets := G.Pellets + 1;
+            elsif G.Tiles (X, Y).Power then
+               G.Powers := G.Powers + 1;
             end if;
          end loop;
       end loop;
       Assert_Reachable (G);
-      G.Lives := Initial_Lives;
       Assign_Cover (G);
       Assign_Flee (G);
       G.Started := True;
@@ -2666,6 +2835,8 @@ package body Swarm is
       end if;
       return G.Outcome;
    end Outcome;
+
+   function Powers_Left (G : Game) return Natural is (G.Powers);
 
    function Level (G : Game) return Natural is
    begin

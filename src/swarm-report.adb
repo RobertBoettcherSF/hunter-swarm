@@ -311,6 +311,12 @@ package body Swarm.Report is
          Add_Nat (Natural (Param (G, Role_Interval)));
          Add (",""fright_ticks"":");
          Add_Nat (Natural (Param (G, Fright_Ticks)));
+         Add (",""level_fright"":");
+         Add_Nat (Natural (Level_Fright (G)));
+         Add (",""level_haste"":");
+         Add_Nat (Natural (Level_Haste (G)));
+         Add (",""level_weight"":");
+         Add_Nat (Natural (Level_Weight (G)));
          Add (",""starve_ticks"":");
          Add_Nat (Natural (Param (G, Starve_Ticks)));
          Add (",""ghost_stride"":");
@@ -449,6 +455,8 @@ package body Swarm.Report is
       Add_Nat (Catches (G));
       Add (",""pellets_left"":");
       Add_Nat (Pellets_Left (G));
+      Add (",""powers_left"":");
+      Add_Nat (Powers_Left (G));
       Add (",""power_left"":");
       Add_Nat (Power_Left (G));
       Add (",""tick"":");
@@ -458,11 +466,18 @@ package body Swarm.Report is
       Add (",""longest_gap"":");
       Add_Nat (G.Longest_Quiet);
       Add (",""wasted_per_pellet"":");
-      if G.Eaten = 0 then
-         Add_Nat (0);
-      else
-         Add_Nat (G.Wasted / G.Eaten);
-      end if;
+      declare
+         Tenths : Natural;
+      begin
+         if G.Eaten = 0 then
+            Tenths := 0;
+         else
+            Tenths := (G.Wasted * 10 + G.Eaten / 2) / G.Eaten;
+         end if;
+         Add_Nat (Tenths / 10);
+         Add (".");
+         Add_Nat (Tenths mod 10);
+      end;
       Add (",""outcome"":""");
       Add_Outcome (G);
       Add (""",""bias"":");

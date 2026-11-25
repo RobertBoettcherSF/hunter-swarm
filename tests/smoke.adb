@@ -42,7 +42,8 @@ begin
 
    Swarm.Start (G, 0, 1, 1);
    pragma Assert (Swarm.Started (G));
-   pragma Assert (Swarm.Pellets_Left (G) = 228);
+   pragma Assert (Swarm.Pellets_Left (G) = 225);
+   pragma Assert (Swarm.Powers_Left (G) = 3);
    pragma Assert (Swarm.Lives (G) = 5);
    pragma Assert (Swarm.Tile_Code (G, 0, 10) /= 0);
    pragma Assert (Swarm.Tile_Code (G, 18, 10) /= 0);
@@ -124,15 +125,52 @@ begin
       end loop;
       pragma Assert (Swarm.Outcome (G) = Swarm.Level_Cleared);
       pragma Assert (Plain (G) = 0);
+      pragma Assert (Swarm.Pellets_Left (G) = 0);
       pragma Assert (Swarm.Tick_Count (G) < 2500);
       pragma Assert (Swarm.Level (G) = 1);
       Held := Swarm.Score (G);
       Previous := Swarm.Grid_Seed_Of (G);
-      Swarm.Report.Set_Test_Key (Swarm.Report.Key_Level);
-      Swarm.Report.Build (G, Swarm.Report.Side_Eater);
-      Need ("""test_key"":""level-clear""");
-      Need ("""level"":1");
-      Swarm.Advance (G);
+      declare
+         Kept : constant Natural := Swarm.Lives (G);
+      begin
+         Swarm.Report.Set_Test_Key (Swarm.Report.Key_Level);
+         Swarm.Report.Build (G, Swarm.Report.Side_Eater);
+         Need ("""test_key"":""level-clear""");
+         Need ("""level"":1");
+         Need ("""pellets_left"":0");
+         Need ("powers_left");
+         Need ("level_fright");
+         Need ("level_haste");
+         Need ("level_weight");
+         declare
+            Needle : constant String := "wasted_per_pellet"":";
+            Saw : Boolean := False;
+         begin
+            for I in 1 .. Swarm.Report.Length - Needle'Length - 4 loop
+               declare
+                  Match : Boolean := True;
+               begin
+                  for J in Needle'Range loop
+                     if Swarm.Report.Byte (I + J - Needle'First) /= Needle (J) then
+                        Match := False;
+                        exit;
+                     end if;
+                  end loop;
+                  if Match then
+                     for K in 0 .. 4 loop
+                        if Swarm.Report.Byte (I + Needle'Length + K) = '.' then
+                           Saw := True;
+                        end if;
+                     end loop;
+                     exit;
+                  end if;
+               end;
+            end loop;
+            pragma Assert (Saw);
+         end;
+         Swarm.Advance (G);
+         pragma Assert (Swarm.Lives (G) = Kept);
+      end;
       pragma Assert (Swarm.Outcome (G) = Swarm.Running);
       pragma Assert (Swarm.Level (G) = 2);
       pragma Assert (Swarm.Score (G) = Held);
@@ -199,6 +237,8 @@ begin
    Need ("""level""");
    Need ("longest_gap");
    Need ("wasted_per_pellet");
+   Need ("powers_left");
+   Need ("level_fright");
    Need ("""test_key"":""game-end""");
    Need ("""expected"":""smoke run""");
    Need ("""action_log""");
@@ -242,6 +282,24 @@ begin
    pragma Assert (Swarm.API.Get_Height = Swarm.Height);
    pragma Assert (Swarm.API.Get_Param_Count = Swarm.Param_Count);
    pragma Assert (Swarm.API.Get_Started = 1);
+
+   -- Lives are not refilled when a level starts. Stride 1 on the hand maze
+   -- loses lives before the clear; the next level must keep that number.
+   Swarm.Set_Param (G, Swarm.Ghost_Stride, 1, OK);
+   Swarm.Start (G, 0, 1, 1);
+   while Swarm.Outcome (G) = Swarm.Running and then Swarm.Tick_Count (G) < 2500 loop
+      Swarm.Tick (G);
+   end loop;
+   pragma Assert (Swarm.Outcome (G) = Swarm.Level_Cleared);
+   pragma Assert (Swarm.Deaths (G) > 0);
+   pragma Assert (Swarm.Lives (G) + Swarm.Deaths (G) = 5);
+   declare
+      Kept : constant Natural := Swarm.Lives (G);
+   begin
+      Swarm.Advance (G);
+      pragma Assert (Swarm.Lives (G) = Kept);
+      pragma Assert (Swarm.Lives (G) < 5);
+   end;
 
    declare
       File : Ada.Text_IO.File_Type;

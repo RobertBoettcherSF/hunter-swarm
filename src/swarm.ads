@@ -87,6 +87,11 @@ package Swarm is
 
    function Level (G : Game) return Natural;
    function Grid_Seed_Of (G : Game) return Interfaces.Unsigned_32;
+   function Powers_Left (G : Game) return Natural;
+   -- Effective knobs for this level. They are not refilled lives.
+   function Level_Fright (G : Game) return Integer;
+   function Level_Haste (G : Game) return Integer;
+   function Level_Weight (G : Game) return Integer;
 
    -- The level is cleared. Carry the score and the lives onto a new grid.
    procedure Advance (G : in out Game)
@@ -226,6 +231,7 @@ private
       Deaths         : Natural := 0;
       Catches        : Natural := 0;
       Pellets        : Natural := 0;
+      Powers         : Natural := 0;
       Power_Left     : Natural := 0;
       Chain          : Natural := 0;
       Ticks_Since_Eat : Natural := 0;
