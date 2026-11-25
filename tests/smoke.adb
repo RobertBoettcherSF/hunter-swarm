@@ -286,7 +286,7 @@ begin
    -- Lives are not refilled when a level starts. Stride 1 on the hand maze
    -- loses lives before the clear; the next level must keep that number.
    Swarm.Set_Param (G, Swarm.Ghost_Stride, 1, OK);
-   Swarm.Start (G, 0, 1, 1);
+   Swarm.Start (G, 0, 1, 0);
    while Swarm.Outcome (G) = Swarm.Running and then Swarm.Tick_Count (G) < 2500 loop
       Swarm.Tick (G);
    end loop;

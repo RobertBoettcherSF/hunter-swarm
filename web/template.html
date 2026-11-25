@@ -17,6 +17,7 @@ button { background: #243044; color: inherit; border: 1px solid #5c6b82; border-
 button[aria-pressed="true"] { outline: 2px solid #f4d35e; }
 .flag { width: 22px; height: 14px; vertical-align: middle; }
 #stamp { font-family: ui-monospace, monospace; font-size: 12px; opacity: 0.85; overflow-wrap: anywhere; }
+#levelmark { font-size: 1.05rem; padding: 4px 10px; border: 1px solid #5c6b82; border-radius: 6px; background: #243044; }
 #view { display: block; margin: 8px auto; background: #1a1e28; max-width: calc(100% - 16px); touch-action: manipulation; }
 #expect, #crash, #stale { border: 1px solid #8a93a6; padding: 8px; background: #1c2230; }
 #crash, #stale { border-color: #c45c4a; }
@@ -30,6 +31,7 @@ label { display: flex; gap: 8px; align-items: center; }
 <body>
 <header>
   <h1 data-i18n="title">Hunter Swarm</h1>
+  <strong id="levelmark">Level 1</strong>
   <span id="stamp">__STAMP__</span>
   <span id="langs"></span>
   <button id="sound" type="button" aria-pressed="true"></button>
@@ -85,6 +87,7 @@ const grid = document.getElementById("grid");
 const eater = document.getElementById("eater");
 const ghosts = document.getElementById("ghosts");
 const newseeds = document.getElementById("newseeds");
+const levelmark = document.getElementById("levelmark");
 const start = document.getElementById("start");
 const stop = document.getElementById("stop");
 const reset = document.getElementById("reset");
@@ -537,6 +540,7 @@ function draw() {
   const code = ada.hs_decision(0);
   const key = DECISION_KEYS[code] || "none";
   const word = ended ? t(OUTCOME[oc] || "ready") : paused ? t("paused") : running ? t("running") : t("ready");
+  levelmark.textContent = t("level") + " " + ada.hs_level();
   status.textContent = t("level") + " " + ada.hs_level()
     + " · " + t("score") + " " + ada.hs_score()
     + " · " + t("lives") + " " + ada.hs_lives()

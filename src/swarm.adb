@@ -1642,25 +1642,65 @@ package body Swarm is
          Pull_Power := Have_Pow and then
            (not Have_Here
             or else (Ghost_D <= G.Params (Threat_Range) and then Power_Here < Ghost_D));
-         for Id in Ghost_Id loop
-            if Hostile (Id)
-              and then Span
-                (Integer (G.Ghosts (Id).X), Integer (G.Ghosts (Id).Y),
-                 Integer (G.E_X), Integer (G.E_Y)) <= 8
-            then
-               case Approach_Side
-                 (Integer (G.E_X), Integer (G.E_Y),
-                  Integer (G.Ghosts (Id).X), Integer (G.Ghosts (Id).Y))
-               is
-                  when 0 => West := True;
-                  when 1 => East := True;
-                  when 2 => North := True;
-                  when 3 => South := True;
-                  when others => null;
-               end case;
+         declare
+            Closing : Natural := 0;
+            Wide : Boolean := False;
+         begin
+            for Id in Ghost_Id loop
+               if Hostile (Id) then
+                  declare
+                     Now_D : constant Integer :=
+                       Span (Integer (G.Ghosts (Id).X), Integer (G.Ghosts (Id).Y),
+                             Integer (G.E_X), Integer (G.E_Y));
+                     Next_D : Integer := Now_D;
+                  begin
+                     if Pred_X (Id, 1) >= 0 then
+                        Next_D := Span
+                          (Pred_X (Id, 1), Pred_Y (Id, 1),
+                           Integer (G.E_X), Integer (G.E_Y));
+                     end if;
+                     -- A second ghost still two steps further out than the
+                     -- old "distance 3" deaths. Closing, or already inside 5.
+                     if Now_D <= 6 and then (Next_D < Now_D or else Now_D <= 5) then
+                        Closing := Closing + 1;
+                     end if;
+                     if Now_D <= 10 then
+                        case Approach_Side
+                          (Integer (G.E_X), Integer (G.E_Y),
+                           Integer (G.Ghosts (Id).X), Integer (G.Ghosts (Id).Y))
+                        is
+                           when 0 => West := True;
+                           when 1 => East := True;
+                           when 2 => North := True;
+                           when 3 => South := True;
+                           when others => null;
+                        end case;
+                     end if;
+                  end;
+               end if;
+            end loop;
+            for K in 0 .. 3 loop
+               declare
+                  NX, NY : Integer;
+               begin
+                  if Try_Walk
+                    (G, Integer (G.E_X), Integer (G.E_Y),
+                     Dirs (K).DX, Dirs (K).DY, False, NX, NY)
+                    and then Egress (G, NX, NY) >= 3
+                  then
+                     Wide := True;
+                  end if;
+               end;
+            end loop;
+            if Egress (G, Integer (G.E_X), Integer (G.E_Y)) >= 3 then
+               Wide := True;
             end if;
-         end loop;
-         Pincer_Early := (West and East) or else (North and South);
+            -- Leave while a junction is still open, not after the corridor
+            -- has already narrowed to two exits.
+            Pincer_Early := Wide and then
+              (Closing >= 2
+               or else ((West and East) or else (North and South)));
+         end;
          if Pincer_Early then
             Nearest_Escape
               (G, Integer (G.E_X), Integer (G.E_Y),
@@ -1743,7 +1783,14 @@ package body Swarm is
                         Order, False, False, False, False, False,
                         Have_Next, NX_Food, NY_Food, ND, NSX, NSY);
                      if Have_Next and then ND + 1 = Esc_D then
-                        Score := Score + Food_Pull + 80;
+                        -- Beats the food term by more than the tie gap, so the
+                        -- dice takes this step unless another exit scores as high.
+                        Score := Score + Food_Pull + 120;
+                     elsif Egress (G, NX, NY) <= 2
+                       and then not In_Tunnel (NX, NY)
+                       and then not Power_At (G, NX, NY)
+                     then
+                        Score := Score - Food_Pull / 2;
                      end if;
                   end if;
                   if G.Power_Left > 0 and then Have_Fright
@@ -1802,7 +1849,10 @@ package body Swarm is
             Code := Seek_Power;
          elsif G.Power_Left > 0 and then Have_Fright then
             Code := Hunt;
-         elsif Cornered or else Lethal_Cell (G, Integer (G.E_X), Integer (G.E_Y)) then
+         elsif Pincer_Early
+           or else Cornered
+           or else Lethal_Cell (G, Integer (G.E_X), Integer (G.E_Y))
+         then
             Code := Flee;
          else
             Code := Seek_Pellet;
