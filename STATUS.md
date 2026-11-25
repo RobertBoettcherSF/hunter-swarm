@@ -4,7 +4,7 @@
 - Live: commit-pinned githack page (the URL is on the pull request). Pages is wired and not enabled.
 - Test: `./run-tests.sh`. Local page: open `docs/index.html` after `./build.sh`. The stamp in that file matches `docs/version.txt`.
 - What: self-playing maze chase. Rules and both AIs are plain Ada compiled to WebAssembly. The page draws, takes buttons, and downloads reports.
-- Status (2026-11-25): round 7. Lives carry from one level to the next and are not refilled. Each level the ghosts take a few more steps, the power fright is shorter, and their closing and blocking weights rise. Ghosts hold back while the eater can reach a power pellet, and while the eater is powered they scatter and stay out of chain range. A forming pincer sends the eater toward a tunnel, a loop, or a power pellet. Reports separate ordinary pellets from power pellets, and wasted steps per pellet has one decimal. Stamp is the string in `version.txt` (v0.7).
+- Status (2026-11-25): round 7. Lives carry from one level to the next and are not refilled. Each level the ghosts take a few more steps, the power fright is shorter, and their closing and blocking weights rise. Ghosts hold back while the eater can reach a power pellet, and while the eater is powered they scatter and stay out of chain range. A forming pincer sends the eater toward a tunnel, a loop, or a power pellet. Reports separate ordinary pellets from power pellets, and wasted steps per pellet has one decimal. Stamp `v0.7 b20261125-1246 031810a`.
 - SPARK: not started (D-008). No proof run.
 - Gap: none recorded against D-005, D-007, D-025, or D-027. Wasm checks are off on purpose (D-027); `./run-tests.sh` runs the contracts.
 - Next: none agreed. Open questions are below.
