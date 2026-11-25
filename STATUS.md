@@ -4,7 +4,7 @@
 - Live: commit-pinned githack page (the URL is on the pull request). Pages is wired and not enabled.
 - Test: `./run-tests.sh`. Local page: open `docs/index.html` after `./build.sh`. The stamp in that file matches `docs/version.txt`.
 - What: self-playing maze chase. Rules and both AIs are plain Ada compiled to WebAssembly. The page draws, takes buttons, and downloads reports.
-- Status (2026-11-25): round 5. Tunnels also wrap through the top and bottom edges. Both sides pick a step with a weighted dice roll from a fitness score, and both remember recent cells. Ghosts leave a cover post when the eater is far, and two ghosts near the eater approach from different sides. A long stretch with no pellet and no death is logged as `loop_detected`. Stamp is the string in `version.txt` (v0.5).
+- Status (2026-11-25): round 5. Tunnels also wrap through the top and bottom edges. Both sides pick a step with a weighted dice roll from a fitness score, and both remember recent cells. Ghosts leave a cover post when the eater is far, and two ghosts near the eater approach from different sides. A long stretch with no pellet and no death is logged as `loop_detected`. Stamp `v0.5 b20261125-1211 2146174`.
 - SPARK: not started (D-008). No proof run.
 - Gap: none recorded against D-005, D-007, D-025, or D-027. Wasm checks are off on purpose (D-027); `./run-tests.sh` runs the contracts.
 - Next: none agreed. Open questions are below.
