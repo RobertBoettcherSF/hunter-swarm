@@ -488,6 +488,10 @@ package body Swarm.Report is
             end;
             Add ("],""exits"":");
             Add_Nat (G.Why (I).Exits);
+            Add (",""decision"":""");
+            Add_Decision_Name (G.Why (I).Choice);
+            Add (""",""killer_dist_ago"":");
+            Add_Nat (G.Why (I).Dist_Ago);
             Add ("}");
          end loop;
       end;

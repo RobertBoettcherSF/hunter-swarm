@@ -147,12 +147,15 @@ private
    end record;
 
    type Death_Note is record
-      Tick   : Natural := 0;
-      Killer : Natural := 0;
-      Near   : Natural := 0;
-      Exits  : Natural := 0;
+      Tick     : Natural := 0;
+      Killer   : Natural := 0;
+      Near     : Natural := 0;
+      Exits    : Natural := 0;
+      Choice   : Decision_Code := None;
+      Dist_Ago : Natural := 0;
    end record;
    type Death_List is array (1 .. Max_Deaths) of Death_Note;
+   type Ago_Array is array (Ghost_Id, 1 .. Lookahead) of Natural;
 
    type Param_Array is array (Param_Index) of Integer;
    type Ghost_Array is array (Ghost_Id) of Ghost;
@@ -177,6 +180,7 @@ private
       Commit_Code    : Decision_Code := None;
       Death_Count    : Natural := 0;
       Why            : Death_List := [others => <>];
+      Ago            : Ago_Array := [others => [others => 0]];
       Tick           : Natural := 0;
       Score          : Natural := 0;
       Lives          : Natural := 0;

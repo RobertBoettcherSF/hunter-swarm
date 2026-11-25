@@ -239,6 +239,51 @@ package body Swarm is
 
    procedure Hostile_Map (G : Game; D : out Dist_Map; Any : out Boolean);
 
+   function Ghost_Stands (G : Game; X, Y : Integer) return Boolean is
+   begin
+      for Id in Ghost_Id loop
+         if G.Ghosts (Id).Mode /= G_Return
+           and then G.Ghosts (Id).Mode /= G_Flee
+           and then Integer (G.Ghosts (Id).X) = X
+           and then Integer (G.Ghosts (Id).Y) = Y
+         then
+            return True;
+         end if;
+      end loop;
+      return False;
+   end Ghost_Stands;
+
+   -- On a tick the ghosts move after the eater, any cell next to a hostile
+   -- ghost is a cell that ghost can step onto once the eater has moved.
+   function Lethal_Cell (G : Game; X, Y : Integer) return Boolean is
+   begin
+      if Ghost_Stands (G, X, Y) then
+         return True;
+      end if;
+      if G.Power_Left = 0 and then G.Params (Ghost_Stride) >= 1
+        and then G.Tick mod G.Params (Ghost_Stride) = 0
+      then
+         for Id in Ghost_Id loop
+            if G.Ghosts (Id).Mode /= G_Return
+              and then G.Ghosts (Id).Mode /= G_Flee
+              and then abs (Integer (G.Ghosts (Id).X) - X)
+                + abs (Integer (G.Ghosts (Id).Y) - Y) = 1
+            then
+               return True;
+            end if;
+         end loop;
+      end if;
+      return False;
+   end Lethal_Cell;
+
+   function Power_At (G : Game; X, Y : Integer) return Boolean is
+   begin
+      if not Open (G, X, Y) then
+         return False;
+      end if;
+      return G.Tiles (X_Pos (X), Y_Pos (Y)).Power;
+   end Power_At;
+
    function Cell_Exits (G : Game; X : X_Pos; Y : Y_Pos) return Natural is
       N : Natural := 0;
    begin
@@ -252,7 +297,7 @@ package body Swarm is
 
    procedure Seek_From
      (G : Game; SX, SY : Integer; Mode : Seek_Kind; TX, TY : Integer;
-      Order : Natural; Safe : Boolean; Skip_Pocket : Boolean;
+      Order : Natural; Safe, Skip_Pocket, Block_Ghosts, Avoid_Power : Boolean;
       Found : out Boolean; GX, GY, Dist, Step_X, Step_Y : out Integer)
    is
       D  : Dist_Map;
@@ -361,6 +406,12 @@ package body Swarm is
                           and then HD (X_Pos (NX), Y_Pos (NY)) /= Unseen
                           and then HD (X_Pos (NX), Y_Pos (NY)) <= Next_D
                         then
+                           Blocked := True;
+                        end if;
+                        if Block_Ghosts and then Lethal_Cell (G, NX, NY) then
+                           Blocked := True;
+                        end if;
+                        if Avoid_Power and then Power_At (G, NX, NY) then
                            Blocked := True;
                         end if;
                         if not Blocked then
@@ -484,31 +535,53 @@ package body Swarm is
    end Assign_Cover;
 
    procedure Assign_Flee (G : in out Game) is
-      Idx : array (1 .. 4) of Ghost_Id := [1, 2, 3, 4];
-      Dist : array (Ghost_Id) of Natural;
    begin
+      -- Each ghost takes a different compass direction away from the eater.
       for Id in Ghost_Id loop
-         Dist (Id) :=
-           abs (Integer (G.Ghosts (Id).Home_X) - Integer (G.E_X))
-           + abs (Integer (G.Ghosts (Id).Home_Y) - Integer (G.E_Y));
-      end loop;
-      for I in 1 .. 3 loop
-         for J in I + 1 .. 4 loop
-            if Dist (Idx (J)) > Dist (Idx (I))
-              or else (Dist (Idx (J)) = Dist (Idx (I)) and then Idx (J) < Idx (I))
-            then
-               declare
-                  Tmp : constant Ghost_Id := Idx (I);
-               begin
-                  Idx (I) := Idx (J);
-                  Idx (J) := Tmp;
-               end;
-            end if;
-         end loop;
-      end loop;
-      for Rank in Ghost_Id loop
-         G.Flee_X (Rank) := Integer (G.Ghosts (Idx (Rank)).Home_X);
-         G.Flee_Y (Rank) := Integer (G.Ghosts (Idx (Rank)).Home_Y);
+         declare
+            Dir : constant Natural := (Id - 1) mod 4;
+            Found : Boolean := False;
+            Best : Integer := Integer'First;
+            Best_X : Integer := Integer (G.E_X);
+            Best_Y : Integer := Integer (G.E_Y);
+         begin
+            for Y in Y_Pos loop
+               for X in X_Pos loop
+                  if G.Tiles (X, Y).Kind = Floor then
+                     declare
+                        Score : Integer;
+                        Taken : Boolean := False;
+                     begin
+                        case Dir is
+                           when 0 =>
+                              Score := Integer (G.E_Y) - Integer (Y);
+                           when 1 =>
+                              Score := Integer (X) - Integer (G.E_X);
+                           when 2 =>
+                              Score := Integer (Y) - Integer (G.E_Y);
+                           when others =>
+                              Score := Integer (G.E_X) - Integer (X);
+                        end case;
+                        for Prev in 1 .. Id - 1 loop
+                           if G.Flee_X (Prev) = Integer (X)
+                             and then G.Flee_Y (Prev) = Integer (Y)
+                           then
+                              Taken := True;
+                           end if;
+                        end loop;
+                        if not Taken and then (not Found or else Score > Best) then
+                           Found := True;
+                           Best := Score;
+                           Best_X := Integer (X);
+                           Best_Y := Integer (Y);
+                        end if;
+                     end;
+                  end if;
+               end loop;
+            end loop;
+            G.Flee_X (Id) := Best_X;
+            G.Flee_Y (Id) := Best_Y;
+         end;
       end loop;
    end Assign_Flee;
 
@@ -650,6 +723,8 @@ package body Swarm is
          end if;
       end loop;
       G.Why (Slot).Near := Bits;
+      G.Why (Slot).Choice := G.E_Last.Code;
+      G.Why (Slot).Dist_Ago := G.Ago (By, Lookahead);
    end Note_Death;
 
    procedure Kill (G : in out Game; By : Ghost_Id) is
@@ -800,7 +875,8 @@ package body Swarm is
                      then
                         Aim (Id, TX, TY);
                         Seek_From
-                          (G, SX, SY, Seek_Cell, TX, TY, G.Bias, False, False,
+                          (G, SX, SY, Seek_Cell, TX, TY, G.Bias,
+                           False, False, False, False,
                            Found, GX, GY, Dist, NX, NY);
                         if Found and then Open (G, NX, NY)
                           and then abs (NX - SX) + abs (NY - SY) = 1
@@ -924,7 +1000,7 @@ package body Swarm is
                NY : constant Integer := Integer (G.E_Y) + Dir.DY;
                Score : Integer := Lookahead + 1;
             begin
-               if Open (G, NX, NY) then
+               if Open (G, NX, NY) and then not Lethal_Cell (G, NX, NY) then
                   for Step in 1 .. Lookahead loop
                      for Id in Ghost_Id loop
                         if Hostile (Id)
@@ -971,30 +1047,101 @@ package body Swarm is
       begin
          Seek_From
            (G, Integer (G.E_X), Integer (G.E_Y), Seek_Food, 0, 0,
-            Order, True, True, Have, FX, FY, FD, SX, SY);
+            Order, True, True, True, True, Have, FX, FY, FD, SX, SY);
          if not Have then
             Seek_From
               (G, Integer (G.E_X), Integer (G.E_Y), Seek_Food, 0, 0,
-               Order, True, False, Have, FX, FY, FD, SX, SY);
+               Order, True, False, True, True, Have, FX, FY, FD, SX, SY);
          end if;
          if not Have then
             Seek_From
               (G, Integer (G.E_X), Integer (G.E_Y), Seek_Food, 0, 0,
-               Order, False, True, Have, FX, FY, FD, SX, SY);
+               Order, False, True, True, True, Have, FX, FY, FD, SX, SY);
          end if;
          if not Have then
             Seek_From
               (G, Integer (G.E_X), Integer (G.E_Y), Seek_Food, 0, 0,
-               Order, False, False, Have, FX, FY, FD, SX, SY);
+               Order, False, False, True, True, Have, FX, FY, FD, SX, SY);
          end if;
       end Find_Food;
 
       procedure Finish
         (Code : Decision_Code; TX, TY, SX, SY : Integer; Hold : Natural)
       is
+         UX : Integer := SX;
+         UY : Integer := SY;
+
+         function Allowed (X, Y : Integer; Allow_Power : Boolean) return Boolean is
+           (Open (G, X, Y) and then not Lethal_Cell (G, X, Y)
+            and then (Allow_Power or else not Power_At (G, X, Y)));
       begin
+         -- A power pellet is an allowed step when staying would be fatal.
+         if not Allowed (UX, UY, Code = Seek_Power
+                         or else Lethal_Cell (G, Integer (G.E_X), Integer (G.E_Y)))
+         then
+            declare
+               Alt : Boolean := False;
+               Danger : constant Boolean :=
+                 Lethal_Cell (G, Integer (G.E_X), Integer (G.E_Y));
+            begin
+               for K in 0 .. 3 loop
+                  declare
+                     Dir : constant Step := Dirs ((K + Order) mod 4);
+                     NX : constant Integer := Integer (G.E_X) + Dir.DX;
+                     NY : constant Integer := Integer (G.E_Y) + Dir.DY;
+                  begin
+                     if Allowed (NX, NY, False) then
+                        UX := NX;
+                        UY := NY;
+                        Alt := True;
+                        exit;
+                     end if;
+                  end;
+               end loop;
+               if not Alt and then (Danger or else Code = Seek_Power) then
+                  for K in 0 .. 3 loop
+                     declare
+                        Dir : constant Step := Dirs ((K + Order) mod 4);
+                        NX : constant Integer := Integer (G.E_X) + Dir.DX;
+                        NY : constant Integer := Integer (G.E_Y) + Dir.DY;
+                     begin
+                        if Allowed (NX, NY, True) then
+                           UX := NX;
+                           UY := NY;
+                           Alt := True;
+                           exit;
+                        end if;
+                     end;
+                  end loop;
+               end if;
+               if not Alt then
+                  UX := Integer (G.E_X);
+                  UY := Integer (G.E_Y);
+               end if;
+            end;
+         end if;
+         -- A lethal step is only allowed when every open neighbour is lethal too.
+         if Lethal_Cell (G, UX, UY) then
+            declare
+               Safe : Boolean :=
+                 not Lethal_Cell (G, Integer (G.E_X), Integer (G.E_Y));
+            begin
+               for K in 0 .. 3 loop
+                  declare
+                     Dir : constant Step := Dirs (K);
+                     NX : constant Integer := Integer (G.E_X) + Dir.DX;
+                     NY : constant Integer := Integer (G.E_Y) + Dir.DY;
+                  begin
+                     if Open (G, NX, NY) and then not Lethal_Cell (G, NX, NY) then
+                        Safe := True;
+                     end if;
+                  end;
+               end loop;
+               pragma Assert (not Safe);
+            end;
+         end if;
          Note_Choice (G, G.E_Last, 0, Code, TX, TY);
-         Step_Eater (G, SX, SY);
+         Step_Eater (G, UX, UY);
          if Hold > 1 then
             G.Commit_Code := Code;
             G.Commit_X := TX;
@@ -1010,6 +1157,19 @@ package body Swarm is
             Resolve (G);
          end if;
       end Finish;
+
+      function Catchable return Boolean is
+         D : Dist_Map;
+         Any : Boolean;
+      begin
+         Hostile_Map (G, D, Any);
+         if not Any or else D (G.E_X, G.E_Y) = Unseen then
+            return False;
+         end if;
+         -- Close enough that spending a power pellet can catch them.
+         -- Fright lasts longer than this; a ghost anywhere on the maze is not "near".
+         return D (G.E_X, G.E_Y) <= G.Params (Danger_Radius);
+      end Catchable;
 
       Have_Food, Have_Power, Have_Hunt : Boolean;
       Food_D, Power_D, Hunt_D : Integer;
@@ -1027,6 +1187,12 @@ package body Swarm is
          Within := 1;
       end if;
       Fill_Pred;
+      if G.Commit_Left > 0 and then G.Commit_Code = Seek_Power
+        and then not (Pincer or else Reaches_Us or else Safe_Exits = 0
+                      or else Catchable)
+      then
+         G.Commit_Left := 0;
+      end if;
       if G.Commit_Left > 0 then
          declare
             Found : Boolean;
@@ -1034,9 +1200,11 @@ package body Swarm is
          begin
             Seek_From
               (G, Integer (G.E_X), Integer (G.E_Y), Seek_Cell,
-               G.Commit_X, G.Commit_Y, Order, False, False,
+               G.Commit_X, G.Commit_Y, Order, False, False, True,
+               G.Commit_Code /= Seek_Power,
                Found, GX, GY, Dist, SX, SY);
             if Found and then not Step_Fatal (SX, SY)
+              and then not Lethal_Cell (G, SX, SY)
               and then (SX /= Integer (G.E_X) or else SY /= Integer (G.E_Y))
             then
                Finish (G.Commit_Code, G.Commit_X, G.Commit_Y, SX, SY, G.Commit_Left);
@@ -1048,11 +1216,11 @@ package body Swarm is
       Find_Food (Have_Food, Food_X, Food_Y, Food_D, Food_SX, Food_SY);
       Seek_From
         (G, Integer (G.E_X), Integer (G.E_Y), Seek_Power, 0, 0,
-         Order, False, False,
+         Order, False, False, True, False,
          Have_Power, Power_X, Power_Y, Power_D, Power_SX, Power_SY);
       Seek_From
         (G, Integer (G.E_X), Integer (G.E_Y), Seek_Fright, 0, 0,
-         Order, False, False,
+         Order, False, False, True, True,
          Have_Hunt, Hunt_X, Hunt_Y, Hunt_D, Hunt_SX, Hunt_SY);
       if G.Power_Left > 0 and then Have_Hunt
         and then Hunt_D <= G.Params (Hunt_Range)
@@ -1061,20 +1229,16 @@ package body Swarm is
         and then (not Have_Food or else Hunt_D < Food_D)
       then
          Finish (Hunt, Hunt_X, Hunt_Y, Hunt_SX, Hunt_SY, 0);
+      elsif G.Power_Left = 0 and then Have_Power
+        and then (Pincer or else Reaches_Us or else Safe_Exits = 0
+                  or else (Power_D <= G.Params (Power_Seek) and then Catchable))
+      then
+         Finish (Seek_Power, Power_X, Power_Y, Power_SX, Power_SY, Commit_Ticks);
       elsif G.Power_Left = 0
         and then (Pincer or else Reaches_Us or else Safe_Exits = 0)
       then
-         if Have_Power then
-            Finish (Seek_Power, Power_X, Power_Y, Power_SX, Power_SY, Commit_Ticks);
-         else
-            Escape_Target (Esc_SX, Esc_SY, Esc_TX, Esc_TY);
-            Finish (Flee, Esc_TX, Esc_TY, Esc_SX, Esc_SY, Commit_Ticks);
-         end if;
-      elsif G.Power_Left = 0 and then Have_Power
-        and then Power_D <= G.Params (Power_Seek)
-        and then (Reaches_Us or else Safe_Exits < Cell_Exits (G, G.E_X, G.E_Y))
-      then
-         Finish (Seek_Power, Power_X, Power_Y, Power_SX, Power_SY, Commit_Ticks);
+         Escape_Target (Esc_SX, Esc_SY, Esc_TX, Esc_TY);
+         Finish (Flee, Esc_TX, Esc_TY, Esc_SX, Esc_SY, Commit_Ticks);
       elsif Have_Food then
          Finish (Seek_Pellet, Food_X, Food_Y, Food_SX, Food_SY, 0);
       else
@@ -1135,7 +1299,7 @@ package body Swarm is
       end if;
       Seek_From
         (G, Integer (G.Ghosts (Id).X), Integer (G.Ghosts (Id).Y),
-         Seek_Cell, TX, TY, G.Bias, False, False,
+         Seek_Cell, TX, TY, G.Bias, False, False, False, False,
          Found, GX, GY, Dist, SX, SY);
       if not Found then
          SX := Integer (G.Ghosts (Id).X);
@@ -1564,6 +1728,14 @@ package body Swarm is
       end if;
       G.Tick := G.Tick + 1;
       G.Ate := False;
+      for Id in Ghost_Id loop
+         for T in reverse 2 .. Lookahead loop
+            G.Ago (Id, T) := G.Ago (Id, T - 1);
+         end loop;
+         G.Ago (Id, 1) :=
+           abs (Integer (G.Ghosts (Id).X) - Integer (G.E_X))
+           + abs (Integer (G.Ghosts (Id).Y) - Integer (G.E_Y));
+      end loop;
       if G.Respawn_Pause > 0 then
          G.Respawn_Pause := G.Respawn_Pause - 1;
       elsif G.Power_Left > 0 then

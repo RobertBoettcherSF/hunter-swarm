@@ -12,8 +12,8 @@ AI assistance was used to write this project.
 
 ## Play
 
-After a build, open `docs/index.html` in a browser. Nothing else is fetched
-except a version check, which fails quietly while the repository is private.
+After a build, open `docs/index.html` in a browser. The page also compares
+its stamp with `docs/version.txt` when that file can be fetched.
 
 - **Start**, **Stop**, **Speed**, **Reset**.
 - **Grid seed** builds the maze. 0 is the fixed hand-made maze. Any other
@@ -36,7 +36,7 @@ except a version check, which fails quietly while the repository is private.
 JSON, schema `hunter-swarm-report` v1. Each file has the stamp, the three seeds, the
 test key (`stop`, `game-end`, `f9`, or `crash`), the action log, the state
 hash, events, errors, and a `custom` object with the settings, the score, the
-lives and the decisions for that side. The eater file also lists `why_died` for each death. `custom.summary` is three lines:
+lives and the decisions for that side. The eater file also lists `why_died` for each death: tick, killer, ghosts within two steps, open exits, the decision the eater was committed to, and the killer's distance a few ticks earlier. `custom.summary` is three lines:
 `BUILD`, `TEST KEY`, `SUMMARY`.
 
 ## Build and test

@@ -57,6 +57,38 @@ begin
    H2 := Swarm.State_Hash (G);
    pragma Assert (H1 = H2);
 
+   -- Robert's v0.2 loss: grid 3437685755, eater 2389119185, ghosts 3742138053.
+   -- The eater stepped into a ghost's reach while another exit was open, and
+   -- ate a power pellet in the first seven ticks with no ghost near. The
+   -- contract in Move_Eater fails the first case. The count below fails the second.
+   Swarm.Start (G, 3437685755, 2389119185, 3742138053);
+   for I in 1 .. 500 loop
+      exit when Swarm.Outcome (G) /= Swarm.Running;
+      Swarm.Tick (G);
+   end loop;
+   pragma Assert (Swarm.Tick_Count (G) >= 174);
+   Swarm.Start (G, 3437685755, 2389119185, 3742138053);
+   declare
+      function Powers (Game : Swarm.Game) return Natural is
+         N : Natural := 0;
+      begin
+         for Y in 0 .. Swarm.Height - 1 loop
+            for X in 0 .. Swarm.Width - 1 loop
+               if Swarm.Tile_Code (Game, X, Y) = 3 then
+                  N := N + 1;
+               end if;
+            end loop;
+         end loop;
+         return N;
+      end Powers;
+      At_Start : constant Natural := Powers (G);
+   begin
+      for I in 1 .. 7 loop
+         Swarm.Tick (G);
+      end loop;
+      pragma Assert (Powers (G) = At_Start);
+   end;
+
    Swarm.Start (G, 0, 1, 2);
    while Swarm.Outcome (G) = Swarm.Running loop
       Swarm.Tick (G);
@@ -84,6 +116,8 @@ begin
    Need ("""eater"":1");
    Need ("""ghosts"":2");
    Need ("""why_died""");
+   Need ("killer_dist_ago");
+   Need ("""decision""");
    Need ("""test_key"":""game-end""");
    Need ("""expected"":""smoke run""");
    Need ("""action_log""");
