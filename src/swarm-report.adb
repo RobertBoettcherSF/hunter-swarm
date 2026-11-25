@@ -132,6 +132,7 @@ package body Swarm.Report is
          when Win => Add ("win");
          when Lose => Add ("lose");
          when Timeout => Add ("timeout");
+         when Loop_Detected => Add ("loop_detected");
       end case;
    end Add_Event_Name;
 
@@ -327,6 +328,33 @@ package body Swarm.Report is
          Add_Nat (Lookahead);
          Add (",""commit_ticks"":");
          Add_Nat (Commit_Ticks);
+         Add (",""loop_ticks"":");
+         Add_Nat (Loop_Ticks);
+         Add (",""why_died_fields"":[""tick"",""killer"",""near"",""exits"",""decision"",""killer_dist_ago""]");
+         Add (",""eater_w_pellet"":");
+         Add_Nat (W_Pellet);
+         Add (",""eater_w_power"":");
+         Add_Nat (W_Power);
+         Add (",""eater_w_danger"":");
+         Add_Nat (W_Danger);
+         Add (",""eater_w_exits"":");
+         Add_Nat (W_Exits);
+         Add (",""eater_w_progress"":");
+         Add_Nat (W_Progress);
+         Add (",""eater_w_loop"":");
+         Add_Nat (W_E_Loop);
+         Add (",""ghost_w_close"":");
+         Add_Nat (W_Close);
+         Add (",""ghost_w_block"":");
+         Add_Nat (W_Block);
+         Add (",""ghost_w_spread"":");
+         Add_Nat (W_Spread);
+         Add (",""ghost_w_tunnel"":");
+         Add_Nat (W_Tunnel);
+         Add (",""ghost_w_loop"":");
+         Add_Nat (W_G_Loop);
+         Add (",""ghost_w_side"":");
+         Add_Nat (W_Side);
          Add ("}");
       end Add_Settings;
    begin
@@ -459,7 +487,32 @@ package body Swarm.Report is
          Add_Nat (Ghost_Mode_Code (G, Id));
          Add ("}");
       end loop;
-      Add ("],""why_died"":[");
+      Add ("],""loop_detected"":");
+      if G.Loop_On then
+         Add ("{""tick"":");
+         Add_Nat (G.Loop_At);
+         Add (",""eater"":{""x"":");
+         Add_Nat (Natural (G.Loop_EX));
+         Add (",""y"":");
+         Add_Nat (Natural (G.Loop_EY));
+         Add ("},""ghosts"":[");
+         for Id in Ghost_Id loop
+            if Id > 1 then
+               Add (",");
+            end if;
+            Add ("{""id"":");
+            Add_Nat (Id);
+            Add (",""x"":");
+            Add_Nat (Natural (G.Loop_GX (Id)));
+            Add (",""y"":");
+            Add_Nat (Natural (G.Loop_GY (Id)));
+            Add ("}");
+         end loop;
+         Add ("]}");
+      else
+         Add ("null");
+      end if;
+      Add (",""why_died"":[");
       declare
          First : Boolean := True;
       begin

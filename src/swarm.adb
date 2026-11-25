@@ -102,6 +102,7 @@ package body Swarm is
    end Ensure;
 
    Tunnel_Y : constant Integer := Height / 2;
+   Tunnel_X : constant Integer := Width / 2;
    Rush_Fast : constant Natural := 1500;
    Rush_All  : constant Natural := 2500;
 
@@ -125,14 +126,18 @@ package body Swarm is
    end In_House;
 
    function In_Tunnel (X, Y : Integer) return Boolean is
-     (Y = Tunnel_Y and then (X <= 6 or else X >= 12));
+     ((Y = Tunnel_Y and then (X <= 6 or else X >= 12))
+      or else (X = Tunnel_X and then (Y <= 5 or else Y >= 12)));
 
    function Span (X1, Y1, X2, Y2 : Integer) return Natural is
       DX : Natural := abs (X1 - X2);
-      DY : constant Natural := abs (Y1 - Y2);
+      DY : Natural := abs (Y1 - Y2);
    begin
       if Y1 = Tunnel_Y and then Y2 = Tunnel_Y and then DX > Width / 2 then
          DX := Width - DX;
+      end if;
+      if X1 = Tunnel_X and then X2 = Tunnel_X and then DY > Height / 2 then
+         DY := Height - DY;
       end if;
       return DX + DY;
    end Span;
@@ -152,6 +157,15 @@ package body Swarm is
          elsif X = Width - 1 and then DX > 0 then
             NX := 0;
             NY := Tunnel_Y;
+         end if;
+      end if;
+      if X = Tunnel_X and then DX = 0 then
+         if Y = 0 and then DY < 0 then
+            NX := Tunnel_X;
+            NY := Height - 1;
+         elsif Y = Height - 1 and then DY > 0 then
+            NX := Tunnel_X;
+            NY := 0;
          end if;
       end if;
       if not Open (G, NX, NY) then
@@ -192,6 +206,16 @@ package body Swarm is
       then
          DX := 1;
          DY := 0;
+      elsif From_X = Tunnel_X and then To_X = Tunnel_X
+        and then From_Y = 0 and then To_Y = Height - 1
+      then
+         DX := 0;
+         DY := -1;
+      elsif From_X = Tunnel_X and then To_X = Tunnel_X
+        and then From_Y = Height - 1 and then To_Y = 0
+      then
+         DX := 0;
+         DY := 1;
       else
          DX := To_X - From_X;
          DY := To_Y - From_Y;
@@ -1005,6 +1029,137 @@ package body Swarm is
       G.Ghosts (Id).Y := Y_Pos (NY);
    end Step_Ghost;
 
+   function Have_Plain (G : Game) return Boolean is
+   begin
+      for Y in Y_Pos loop
+         for X in X_Pos loop
+            if G.Tiles (X, Y).Pellet then
+               return True;
+            end if;
+         end loop;
+      end loop;
+      return False;
+   end Have_Plain;
+
+   type Dice_Slot is record
+      OK    : Boolean := False;
+      X     : Integer := 0;
+      Y     : Integer := 0;
+      Score : Integer := 0;
+   end record;
+   type Dice_Row is array (0 .. 3) of Dice_Slot;
+
+   function Revisit (Marks : Mark_List; X, Y : Integer; Now : Natural) return Integer is
+      Pen : Integer := 0;
+   begin
+      for I in Marks'Range loop
+         if Marks (I).Seen > 0 and then Marks (I).X = X and then Marks (I).Y = Y
+           and then Now >= Marks (I).Seen
+         then
+            declare
+               Age : constant Natural := Now - Marks (I).Seen;
+            begin
+               if Age < Trail_Len then
+                  Pen := Pen + Integer (Trail_Len - Age);
+               end if;
+            end;
+         end if;
+      end loop;
+      return Pen;
+   end Revisit;
+
+   procedure Remember (Marks : in out Mark_List; X, Y : Integer; When_Tick : Natural) is
+      Slot : Natural;
+   begin
+      if When_Tick = 0 then
+         return;
+      end if;
+      Slot := ((When_Tick - 1) mod Trail_Len) + 1;
+      Marks (Slot) := (X => X, Y => Y, Seen => When_Tick);
+   end Remember;
+
+   procedure Draw_Step
+     (Rng : in out Interfaces.Unsigned_32; C : Dice_Row;
+      X, Y : out Integer; Took : out Boolean)
+   is
+      Found : Boolean := False;
+      Floor : Integer := 0;
+      Total : Natural := 0;
+      Roll, Acc : Natural := 0;
+   begin
+      Took := False;
+      X := 0;
+      Y := 0;
+      for I in C'Range loop
+         if C (I).OK and then (not Found or else C (I).Score < Floor) then
+            Floor := C (I).Score;
+            Found := True;
+         end if;
+      end loop;
+      if not Found then
+         return;
+      end if;
+      for I in C'Range loop
+         if C (I).OK then
+            declare
+               Shift : Integer := C (I).Score - Floor + 1;
+            begin
+               if Shift < 1 then
+                  Shift := 1;
+               elsif Shift > 30 then
+                  Shift := 30;
+               end if;
+               Total := Total + Natural (Shift * Shift);
+            end;
+         end if;
+      end loop;
+      pragma Assert (Total > 0);
+      Rng := Rng * 1664525 + 1013904223;
+      if Rng = 0 then
+         Rng := 1;
+      end if;
+      Roll := Natural (Rng mod Interfaces.Unsigned_32 (Total));
+      for I in C'Range loop
+         if C (I).OK then
+            declare
+               Shift : Integer := C (I).Score - Floor + 1;
+               Weight : Natural;
+            begin
+               if Shift < 1 then
+                  Shift := 1;
+               elsif Shift > 30 then
+                  Shift := 30;
+               end if;
+               Weight := Natural (Shift * Shift);
+               Acc := Acc + Weight;
+               if Roll < Acc then
+                  X := C (I).X;
+                  Y := C (I).Y;
+                  Took := True;
+                  return;
+               end if;
+            end;
+         end if;
+      end loop;
+   end Draw_Step;
+
+   function Approach_Side (EX, EY, X, Y : Integer) return Integer is
+      DX : constant Integer := X - EX;
+      DY : constant Integer := Y - EY;
+   begin
+      if abs (DX) >= abs (DY) then
+         if DX < 0 then
+            return 0;
+         else
+            return 1;
+         end if;
+      elsif DY < 0 then
+         return 2;
+      else
+         return 3;
+      end if;
+   end Approach_Side;
+
    procedure Move_Eater (G : in out Game) is
       Order : constant Natural := G.Eater_Bias;
       Within : Natural := G.Params (Danger_Radius);
@@ -1171,140 +1326,6 @@ package body Swarm is
          return Ghosts >= 2 and then Exits >= 2;
       end Pincer;
 
-      procedure Escape_Target (SX, SY, TX, TY : out Integer) is
-         Best : Integer := Integer'First;
-         Chosen : Boolean := False;
-         Near : Boolean;
-         Threat : Dist_Map;
-         Any : Boolean;
-
-         -- Prefer a tunnel or a loop. Remember the best cell down this step.
-         procedure Probe
-           (OX, OY : Integer; Bonus : out Integer; Goal_X, Goal_Y : out Integer)
-         is
-            Seen : array (X_Pos, Y_Pos) of Boolean := [others => [others => False]];
-            QX : array (0 .. Width * Height - 1) of Integer;
-            QY : array (0 .. Width * Height - 1) of Integer;
-            Head, Tail : Natural := 0;
-         begin
-            Bonus := 0;
-            Goal_X := OX;
-            Goal_Y := OY;
-            Seen (X_Pos (OX), Y_Pos (OY)) := True;
-            QX (0) := OX;
-            QY (0) := OY;
-            Tail := 1;
-            while Head /= Tail and then Head < 24 loop
-               declare
-                  CX : constant Integer := QX (Head);
-                  CY : constant Integer := QY (Head);
-               begin
-                  Head := Head + 1;
-                  if In_Tunnel (CX, CY) and then Bonus < 12 then
-                     Bonus := 12;
-                     Goal_X := CX;
-                     Goal_Y := CY;
-                  elsif Egress (G, CX, CY) >= 3 and then Bonus < 6
-                    and then not (CX = OX and then CY = OY)
-                  then
-                     Bonus := 6;
-                     Goal_X := CX;
-                     Goal_Y := CY;
-                  end if;
-                  for K in 0 .. 3 loop
-                     declare
-                        NX, NY : Integer;
-                     begin
-                        if Try_Walk
-                          (G, CX, CY, Dirs (K).DX, Dirs (K).DY, False, NX, NY)
-                          and then not Seen (X_Pos (NX), Y_Pos (NY))
-                          and then not (NX = Integer (G.E_X) and then NY = Integer (G.E_Y))
-                        then
-                           Seen (X_Pos (NX), Y_Pos (NY)) := True;
-                           pragma Assert (Tail < QX'Length);
-                           QX (Tail) := NX;
-                           QY (Tail) := NY;
-                           Tail := Tail + 1;
-                        end if;
-                     end;
-                  end loop;
-               end;
-            end loop;
-         end Probe;
-      begin
-         SX := Integer (G.E_X);
-         SY := Integer (G.E_Y);
-         TX := SX;
-         TY := SY;
-         Hostile_Map (G, Threat, Any);
-         Near := Any and then Threat (G.E_X, G.E_Y) /= Unseen
-           and then Threat (G.E_X, G.E_Y) <= G.Params (Threat_Range);
-         for K in 0 .. 3 loop
-            declare
-               Dir : constant Step := Dirs ((K + Order) mod 4);
-               NX, NY : Integer;
-               Score : Integer := Lookahead + 1;
-               Bonus, Goal_X, Goal_Y : Integer;
-            begin
-               if Try_Walk
-                 (G, Integer (G.E_X), Integer (G.E_Y), Dir.DX, Dir.DY, False, NX, NY)
-                 and then not Lethal_Cell (G, NX, NY)
-               then
-                  for Step in 1 .. Lookahead loop
-                     for Id in Ghost_Id loop
-                        if Hostile (Id)
-                          and then Pred_X (Id, Step) = NX
-                          and then Pred_Y (Id, Step) = NY
-                          and then Step < Score
-                        then
-                           Score := Step;
-                        end if;
-                     end loop;
-                  end loop;
-                  Probe (NX, NY, Bonus, Goal_X, Goal_Y);
-                  Score := Score + Bonus;
-                  if Near and then Corridor_Trap
-                    (G, Integer (G.E_X), Integer (G.E_Y), NX, NY)
-                  then
-                     Score := Score - 40;
-                  end if;
-                  if not Chosen or else Score > Best then
-                     Chosen := True;
-                     Best := Score;
-                     SX := NX;
-                     SY := NY;
-                     TX := Goal_X;
-                     TY := Goal_Y;
-                  end if;
-               end if;
-            end;
-         end loop;
-      end Escape_Target;
-
-      procedure Find_Food
-        (Have : out Boolean; FX, FY, FD, SX, SY : out Integer)
-      is
-      begin
-         Seek_From
-           (G, Integer (G.E_X), Integer (G.E_Y), Seek_Food, 0, 0,
-            Order, True, True, True, True, False, Have, FX, FY, FD, SX, SY);
-         if not Have then
-            Seek_From
-              (G, Integer (G.E_X), Integer (G.E_Y), Seek_Food, 0, 0,
-               Order, True, False, True, True, False, Have, FX, FY, FD, SX, SY);
-         end if;
-         if not Have then
-            Seek_From
-              (G, Integer (G.E_X), Integer (G.E_Y), Seek_Food, 0, 0,
-               Order, False, True, True, True, False, Have, FX, FY, FD, SX, SY);
-         end if;
-         if not Have then
-            Seek_From
-              (G, Integer (G.E_X), Integer (G.E_Y), Seek_Food, 0, 0,
-               Order, False, False, True, True, False, Have, FX, FY, FD, SX, SY);
-         end if;
-      end Find_Food;
-
       procedure Finish
         (Code : Decision_Code; TX, TY, SX, SY : Integer; Hold : Natural)
       is
@@ -1441,11 +1462,6 @@ package body Swarm is
          return D (G.E_X, G.E_Y) <= G.Params (Danger_Radius);
       end Catchable;
 
-      Have_Food, Have_Power, Have_Hunt : Boolean;
-      Food_D, Power_D, Hunt_D : Integer;
-      Food_X, Food_Y, Power_X, Power_Y, Hunt_X, Hunt_Y : Integer;
-      Food_SX, Food_SY, Power_SX, Power_SY, Hunt_SX, Hunt_SY : Integer;
-      Esc_SX, Esc_SY, Esc_TX, Esc_TY : Integer;
    begin
       if G.Outcome /= Running then
          return;
@@ -1457,71 +1473,133 @@ package body Swarm is
          Within := 1;
       end if;
       Fill_Pred;
-      if G.Commit_Left > 0 and then G.Commit_Code = Seek_Power
-        and then not (Pincer or else Reaches_Us or else Safe_Exits = 0
-                      or else Catchable)
-      then
-         G.Commit_Left := 0;
-      end if;
-      if G.Commit_Left > 0 then
-         declare
-            Found : Boolean;
-            GX, GY, Dist, SX, SY : Integer;
-         begin
-            Seek_From
-              (G, Integer (G.E_X), Integer (G.E_Y), Seek_Cell,
-               G.Commit_X, G.Commit_Y, Order, False, False, True,
-               G.Commit_Code /= Seek_Power, False,
-               Found, GX, GY, Dist, SX, SY);
-            if Found and then not Step_Fatal (SX, SY)
-              and then not Lethal_Cell (G, SX, SY)
-              and then (SX /= Integer (G.E_X) or else SY /= Integer (G.E_Y))
-            then
-               Finish (G.Commit_Code, G.Commit_X, G.Commit_Y, SX, SY, G.Commit_Left);
-               return;
-            end if;
-            G.Commit_Left := 0;
-         end;
-      end if;
-      Find_Food (Have_Food, Food_X, Food_Y, Food_D, Food_SX, Food_SY);
-      Seek_From
-        (G, Integer (G.E_X), Integer (G.E_Y), Seek_Power, 0, 0,
-         Order, False, False, True, False, False,
-         Have_Power, Power_X, Power_Y, Power_D, Power_SX, Power_SY);
-      Seek_From
-        (G, Integer (G.E_X), Integer (G.E_Y), Seek_Fright, 0, 0,
-         Order, False, False, True, True, False,
-         Have_Hunt, Hunt_X, Hunt_Y, Hunt_D, Hunt_SX, Hunt_SY);
-      if G.Power_Left > 0 and then Have_Hunt
-        and then Hunt_D <= G.Params (Hunt_Range)
-        and then Hunt_D <= G.Power_Left
-        and then G.Ticks_Since_Eat < G.Params (Starve_Ticks)
-        and then (not Have_Food or else Hunt_D < Food_D)
-      then
-         Finish (Hunt, Hunt_X, Hunt_Y, Hunt_SX, Hunt_SY, 0);
-      elsif G.Power_Left = 0 and then Have_Power
-        and then (Pincer or else Reaches_Us or else Safe_Exits = 0
-                  or else (Power_D <= G.Params (Power_Seek) and then Catchable))
-      then
-         Finish (Seek_Power, Power_X, Power_Y, Power_SX, Power_SY, Commit_Ticks);
-      elsif G.Power_Left = 0
-        and then (Pincer or else Reaches_Us or else Safe_Exits = 0)
-      then
-         Escape_Target (Esc_SX, Esc_SY, Esc_TX, Esc_TY);
-         Finish (Flee, Esc_TX, Esc_TY, Esc_SX, Esc_SY, Commit_Ticks);
-      elsif Have_Food then
-         Finish (Seek_Pellet, Food_X, Food_Y, Food_SX, Food_SY, 0);
-      else
-         Finish (Seek_Pellet, Integer (G.E_X), Integer (G.E_Y),
-                 Integer (G.E_X), Integer (G.E_Y), 0);
-      end if;
+      G.Commit_Left := 0;
+      declare
+         Slots : Dice_Row := [others => <>];
+         Safe_N : Natural := 0;
+         Food_Here : Integer := Unseen;
+         Have_Here, Have_Next : Boolean;
+         HX, HY, HD, HSX, HSY : Integer;
+         NX_Food, NY_Food, ND, NSX, NSY : Integer;
+         Cornered : Boolean;
+         Code : Decision_Code := Seek_Pellet;
+         UX, UY : Integer;
+         Took : Boolean;
+      begin
+         Seek_From
+           (G, Integer (G.E_X), Integer (G.E_Y), Seek_Food, 0, 0,
+            Order, False, False, True, True, False,
+            Have_Here, HX, HY, HD, HSX, HSY);
+         if Have_Here then
+            Food_Here := HD;
+         end if;
+         Cornered := Pincer or else Reaches_Us or else Safe_Exits = 0;
+         for K in 0 .. 3 loop
+            declare
+               NX, NY : Integer;
+               Score : Integer := 0;
+            begin
+               if Try_Walk
+                 (G, Integer (G.E_X), Integer (G.E_Y),
+                  Dirs (K).DX, Dirs (K).DY, False, NX, NY)
+               then
+                  Slots (K).OK := True;
+                  Slots (K).X := NX;
+                  Slots (K).Y := NY;
+                  if not Lethal_Cell (G, NX, NY) then
+                     Safe_N := Safe_N + 1;
+                  end if;
+                  if Open (G, NX, NY) and then G.Tiles (X_Pos (NX), Y_Pos (NY)).Pellet
+                  then
+                     Score := Score + W_Pellet;
+                  end if;
+                  if Power_At (G, NX, NY) then
+                     -- A power is food once the ordinary pellets are gone.
+                     -- Until then it is worth taking only when a ghost is close
+                     -- or the eater is cornered.
+                     if Cornered or else Catchable or else not Have_Plain (G) then
+                        Score := Score + W_Power + W_Pellet;
+                     else
+                        Score := Score - W_Power * 3;
+                     end if;
+                  end if;
+                  for Step in 1 .. Within loop
+                     for Id in Ghost_Id loop
+                        if Hostile (Id)
+                          and then Pred_X (Id, Step) = NX
+                          and then Pred_Y (Id, Step) = NY
+                        then
+                           Score := Score - W_Danger * (Integer (Within) + 1 - Step);
+                        end if;
+                     end loop;
+                  end loop;
+                  if Lethal_Cell (G, NX, NY) or else Step_Fatal (NX, NY) then
+                     Score := Score - 500;
+                  end if;
+                  Score := Score + W_Exits * Integer (Egress (G, NX, NY));
+                  Seek_From
+                    (G, NX, NY, Seek_Food, 0, 0,
+                     Order, False, False, True, True, False,
+                     Have_Next, NX_Food, NY_Food, ND, NSX, NSY);
+                  if Have_Here and then Have_Next and then ND < Food_Here then
+                     Score := Score + W_Progress * (Food_Here - ND);
+                  end if;
+                  if G.Power_Left > 0 then
+                     for Id in Ghost_Id loop
+                        if G.Ghosts (Id).Mode = G_Flee
+                          and then Integer (G.Ghosts (Id).X) = NX
+                          and then Integer (G.Ghosts (Id).Y) = NY
+                        then
+                           Score := Score + W_Power;
+                        end if;
+                     end loop;
+                  end if;
+                  if Cornered and then Corridor_Trap
+                    (G, Integer (G.E_X), Integer (G.E_Y), NX, NY)
+                  then
+                     Score := Score - W_E_Loop * 4;
+                  end if;
+                  -- A cell with food is progress, not a loop, so the memory
+                  -- penalty does not talk the eater out of eating it.
+                  if not G.Tiles (X_Pos (NX), Y_Pos (NY)).Pellet
+                    and then not (Power_At (G, NX, NY)
+                                  and then (Cornered or else Catchable
+                                            or else not Have_Plain (G)))
+                  then
+                     Score := Score - W_E_Loop * Revisit (G.E_Marks, NX, NY, G.Tick);
+                  end if;
+                  Slots (K).Score := Score;
+               end if;
+            end;
+         end loop;
+         if Safe_N > 0 then
+            for K in 0 .. 3 loop
+               if Slots (K).OK and then Lethal_Cell (G, Slots (K).X, Slots (K).Y) then
+                  Slots (K).OK := False;
+               end if;
+            end loop;
+         end if;
+         Draw_Step (G.Eater_Rng, Slots, UX, UY, Took);
+         if not Took then
+            UX := Integer (G.E_X);
+            UY := Integer (G.E_Y);
+         elsif Power_At (G, UX, UY) and then (Cornered or else Catchable) then
+            Code := Seek_Power;
+         elsif G.Power_Left > 0 then
+            Code := Hunt;
+         elsif Cornered or else Lethal_Cell (G, Integer (G.E_X), Integer (G.E_Y)) then
+            Code := Flee;
+         else
+            Code := Seek_Pellet;
+         end if;
+         Remember (G.E_Marks, UX, UY, G.Tick);
+         Finish (Code, UX, UY, UX, UY, 0);
+      end;
    end Move_Eater;
 
    procedure Move_One_Ghost (G : in out Game; Id : Ghost_Id) is
       Code : Decision_Code;
       TX, TY : Integer;
-      Found : Boolean;
-      GX, GY, Dist, SX, SY : Integer;
    begin
       if G.Outcome /= Running then
          return;
@@ -1563,8 +1641,17 @@ package body Swarm is
                Code := Cutoff;
                Cutoff_Target (G, TX, TY);
             when G_Cover =>
-               Code := Cover;
-               Cover_Target (G, Id, TX, TY);
+               if Span
+                 (Integer (G.Ghosts (Id).X), Integer (G.Ghosts (Id).Y),
+                  Integer (G.E_X), Integer (G.E_Y)) > Cover_Leash
+               then
+                  Code := Chase;
+                  TX := Integer (G.E_X);
+                  TY := Integer (G.E_Y);
+               else
+                  Code := Cover;
+                  Cover_Target (G, Id, TX, TY);
+               end if;
             when G_Flee =>
                Code := Ghost_Flee;
                TX := G.Flee_X (Id);
@@ -1575,16 +1662,114 @@ package body Swarm is
                TY := Integer (G.Ghosts (Id).Home_Y);
          end case;
       end if;
-      Seek_From
-        (G, Integer (G.Ghosts (Id).X), Integer (G.Ghosts (Id).Y),
-         Seek_Cell, TX, TY, G.Bias, False, False, False, False, True,
-         Found, GX, GY, Dist, SX, SY);
-      if not Found then
-         SX := Integer (G.Ghosts (Id).X);
-         SY := Integer (G.Ghosts (Id).Y);
-      end if;
-      Note_Choice (G, G.Ghosts (Id).Last, Id, Code, TX, TY);
-      Step_Ghost (G, Id, SX, SY);
+      declare
+         Slots : Dice_Row := [others => <>];
+         Near : Natural := 0;
+         Hunting : constant Boolean :=
+           G.Ghosts (Id).Mode /= G_Return and then G.Ghosts (Id).Mode /= G_Flee;
+         UX, UY : Integer;
+         Took : Boolean;
+      begin
+         if Hunting then
+            for Other in Ghost_Id loop
+               if G.Ghosts (Other).Mode /= G_Return
+                 and then G.Ghosts (Other).Mode /= G_Flee
+                 and then Span
+                   (Integer (G.Ghosts (Other).X), Integer (G.Ghosts (Other).Y),
+                    Integer (G.E_X), Integer (G.E_Y)) <= G.Params (Threat_Range)
+               then
+                  Near := Near + 1;
+               end if;
+            end loop;
+         end if;
+         for K in 0 .. 3 loop
+            declare
+               NX, NY : Integer;
+               Score : Integer := 0;
+               Found : Boolean;
+               GX, GY, Dist, SX, SY : Integer;
+            begin
+               if Try_Walk
+                 (G, Integer (G.Ghosts (Id).X), Integer (G.Ghosts (Id).Y),
+                  Dirs (K).DX, Dirs (K).DY, True, NX, NY)
+               then
+                  Slots (K).OK := True;
+                  Slots (K).X := NX;
+                  Slots (K).Y := NY;
+                  Seek_From
+                    (G, NX, NY, Seek_Cell, TX, TY, G.Bias,
+                     False, False, False, False, True,
+                     Found, GX, GY, Dist, SX, SY);
+                  if Found and then Dist < 24 then
+                     Score := Score + W_Close * (24 - Dist);
+                  end if;
+                  if Hunting and then Span (NX, NY, Integer (G.E_X), Integer (G.E_Y)) = 0
+                  then
+                     Score := Score + W_Block * 6;
+                  elsif Hunting
+                    and then Span (NX, NY, Integer (G.E_X), Integer (G.E_Y)) = 1
+                  then
+                     Score := Score + W_Block * 2;
+                  end if;
+                  for Other in Ghost_Id loop
+                     if Other /= Id then
+                        declare
+                           Gap : constant Integer :=
+                             Integer (Span
+                               (NX, NY, Integer (G.Ghosts (Other).X),
+                                Integer (G.Ghosts (Other).Y)));
+                        begin
+                           if Gap < 5 then
+                              Score := Score - W_Spread * (5 - Gap);
+                           end if;
+                        end;
+                     end if;
+                  end loop;
+                  if In_Tunnel (NX, NY) then
+                     Score := Score - W_Tunnel;
+                  end if;
+                  declare
+                     Seen_Here : constant Integer :=
+                       Revisit (G.G_Marks (Id), NX, NY, G.Tick);
+                  begin
+                     Score := Score - W_G_Loop * Seen_Here;
+                     -- A cell visited over and over is a camp. Leave it.
+                     if Seen_Here >= 24 then
+                        Score := Score - 220;
+                     end if;
+                  end;
+                  if Hunting and then Near >= 2 then
+                     declare
+                        Mine : constant Integer :=
+                          Approach_Side (Integer (G.E_X), Integer (G.E_Y), NX, NY);
+                     begin
+                        for Other in Ghost_Id loop
+                           if Other /= Id
+                             and then G.Ghosts (Other).Mode /= G_Return
+                             and then G.Ghosts (Other).Mode /= G_Flee
+                             and then Approach_Side
+                               (Integer (G.E_X), Integer (G.E_Y),
+                                Integer (G.Ghosts (Other).X),
+                                Integer (G.Ghosts (Other).Y)) = Mine
+                           then
+                              Score := Score - W_Side;
+                           end if;
+                        end loop;
+                     end;
+                  end if;
+                  Slots (K).Score := Score;
+               end if;
+            end;
+         end loop;
+         Draw_Step (G.Ghost_Rng, Slots, UX, UY, Took);
+         if not Took then
+            UX := Integer (G.Ghosts (Id).X);
+            UY := Integer (G.Ghosts (Id).Y);
+         end if;
+         Remember (G.G_Marks (Id), UX, UY, G.Tick);
+         Note_Choice (G, G.Ghosts (Id).Last, Id, Code, TX, TY);
+         Step_Ghost (G, Id, UX, UY);
+      end;
       if G.Outcome = Running then
          Resolve (G);
       end if;
@@ -1831,6 +2016,16 @@ package body Swarm is
       Set_Floor (G, 6, 11, True);
       Set_Floor (G, 12, 9, True);
       Set_Floor (G, 12, 11, True);
+      for Y in 0 .. 5 loop
+         Set_Floor (G, Tunnel_X, Y, True);
+      end loop;
+      for Y in 12 .. Height - 1 loop
+         Set_Floor (G, Tunnel_X, Y, True);
+      end loop;
+      Set_Floor (G, Tunnel_X - 1, 5, True);
+      Set_Floor (G, Tunnel_X + 1, 5, True);
+      Set_Floor (G, Tunnel_X - 1, 12, True);
+      Set_Floor (G, Tunnel_X + 1, 12, True);
    end Install_Pen;
 
    -- Every corridor keeps an exit at both ends. The pen stays sealed.
@@ -1911,6 +2106,8 @@ package body Swarm is
       Connect_Ends (G);
       pragma Assert (Open (G, 0, Tunnel_Y));
       pragma Assert (Open (G, Width - 1, Tunnel_Y));
+      pragma Assert (Open (G, Tunnel_X, 0));
+      pragma Assert (Open (G, Tunnel_X, Height - 1));
       pragma Assert (In_House (G, 9, 8));
    end Finish_Maze;
 
@@ -2129,6 +2326,19 @@ package body Swarm is
       G.Error_Line := 0;
       G.E_DX := 1;
       G.E_DY := 0;
+      G.Eater_Rng := Eater_Seed;
+      if G.Eater_Rng = 0 then
+         G.Eater_Rng := 1;
+      end if;
+      G.Ghost_Rng := Ghost_Seed;
+      if G.Ghost_Rng = 0 then
+         G.Ghost_Rng := 1;
+      end if;
+      G.E_Marks := [others => <>];
+      G.G_Marks := [others => <>];
+      G.Quiet := 0;
+      G.Loop_On := False;
+      G.Loop_At := 0;
       Clear_Logs (G);
       if Grid_Seed = 0 then
          Paint_Hand (G);
@@ -2259,6 +2469,23 @@ package body Swarm is
          G.Ticks_Since_Eat := 0;
       else
          G.Ticks_Since_Eat := G.Ticks_Since_Eat + 1;
+      end if;
+      if G.Ate or else G.Lives < Old_Lives then
+         G.Quiet := 0;
+         G.Loop_On := False;
+      elsif G.Outcome = Running then
+         G.Quiet := G.Quiet + 1;
+         if G.Quiet >= Loop_Ticks and then not G.Loop_On then
+            G.Loop_On := True;
+            G.Loop_At := G.Tick;
+            G.Loop_EX := Integer (G.E_X);
+            G.Loop_EY := Integer (G.E_Y);
+            for Id in Ghost_Id loop
+               G.Loop_GX (Id) := Integer (G.Ghosts (Id).X);
+               G.Loop_GY (Id) := Integer (G.Ghosts (Id).Y);
+            end loop;
+            Push_Event (G, Loop_Detected, G.Loop_EX, G.Loop_EY);
+         end if;
       end if;
       if G.Outcome = Running and then G.Tick >= Tick_Cap then
          G.Outcome := Timed_Out;

@@ -30,7 +30,7 @@ sha = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=root,
 if dirty():
     sha += "+"
 when = datetime.datetime.now(ZoneInfo("Europe/Berlin")).strftime("%Y%m%d-%H%M")
-stamp = f"v0.4 b{when} {sha}"
+stamp = f"v0.5 b{when} {sha}"
 
 html = Path(template_path).read_text()
 wasm = Path(wasm_path).read_bytes()

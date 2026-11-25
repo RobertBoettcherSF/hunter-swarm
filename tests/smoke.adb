@@ -42,10 +42,12 @@ begin
 
    Swarm.Start (G, 0, 1, 1);
    pragma Assert (Swarm.Started (G));
-   pragma Assert (Swarm.Pellets_Left (G) = 221);
+   pragma Assert (Swarm.Pellets_Left (G) = 228);
    pragma Assert (Swarm.Lives (G) = 5);
    pragma Assert (Swarm.Tile_Code (G, 0, 10) /= 0);
    pragma Assert (Swarm.Tile_Code (G, 18, 10) /= 0);
+   pragma Assert (Swarm.Tile_Code (G, 9, 0) /= 0);
+   pragma Assert (Swarm.Tile_Code (G, 9, 20) /= 0);
    pragma Assert (Swarm.Tile_Code (G, 9, 8) = 4);
    pragma Assert (Swarm.Ghost_X (G, 1) = 8 and then Swarm.Ghost_Y (G, 1) = 8);
    pragma Assert (Swarm.Ghost_X (G, 2) = 10 and then Swarm.Ghost_Y (G, 2) = 8);
@@ -96,6 +98,29 @@ begin
       pragma Assert (Powers (G) = At_Start);
    end;
 
+   -- Robert's v0.4 stop: grid 1669911216, eater 2140701905, ghosts 367263220.
+   -- From tick 298 to 472 the eater ate nothing and did not die. A dry run
+   -- this long means the power-saving rule is toggling and the test fails.
+   Swarm.Start (G, 1669911216, 2140701905, 367263220);
+   declare
+      Prev_P : Natural := Swarm.Pellets_Left (G);
+      Prev_D : Natural := Swarm.Deaths (G);
+      Dry : Natural := 0;
+   begin
+      for I in 1 .. 450 loop
+         exit when Swarm.Outcome (G) /= Swarm.Running;
+         Swarm.Tick (G);
+         if Swarm.Pellets_Left (G) < Prev_P or else Swarm.Deaths (G) > Prev_D then
+            Dry := 0;
+         else
+            Dry := Dry + 1;
+         end if;
+         Prev_P := Swarm.Pellets_Left (G);
+         Prev_D := Swarm.Deaths (G);
+         pragma Assert (Dry < 80);
+      end loop;
+   end;
+
    Swarm.Start (G, 0, 1, 2);
    while Swarm.Outcome (G) = Swarm.Running loop
       Swarm.Tick (G);
@@ -123,6 +148,10 @@ begin
    Need ("""eater"":1");
    Need ("""ghosts"":2");
    Need ("""why_died""");
+   Need ("""loop_detected""");
+   Need ("eater_w_pellet");
+   Need ("ghost_w_close");
+   Need ("loop_ticks");
    Need ("killer_dist_ago");
    Need ("""decision""");
    Need ("""test_key"":""game-end""");

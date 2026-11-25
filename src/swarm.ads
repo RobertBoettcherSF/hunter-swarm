@@ -89,7 +89,7 @@ private
 
    type Event_Code is
      (Game_Start, Pellet_Eaten, Power_Eaten, Death, Catch,
-      Fright_End, Win, Lose, Timeout);
+      Fright_End, Win, Lose, Timeout, Loop_Detected);
 
    Max_Decisions : constant := 1200;
    Max_Events    : constant := 600;
@@ -106,6 +106,22 @@ private
    Commit_Ticks        : constant := 6;
    Max_Deaths          : constant := 8;
    Leave_Gap           : constant := 8;
+   Trail_Len           : constant := 12;
+   Loop_Ticks          : constant := 80;
+   Cover_Leash         : constant := 8;
+   -- Loaded-dice weights. Higher means that term matters more.
+   W_Pellet            : constant := 24;
+   W_Power             : constant := 18;
+   W_Danger            : constant := 16;
+   W_Exits             : constant := 4;
+   W_Progress          : constant := 7;
+   W_E_Loop            : constant := 6;
+   W_Close             : constant := 10;
+   W_Block             : constant := 8;
+   W_Spread            : constant := 5;
+   W_Tunnel            : constant := 7;
+   W_G_Loop            : constant := 6;
+   W_Side              : constant := 9;
 
    type Tile_Kind is (Wall, Floor);
 
@@ -160,6 +176,15 @@ private
    end record;
    type Death_List is array (1 .. Max_Deaths) of Death_Note;
    type Ago_Array is array (Ghost_Id, 1 .. Lookahead) of Natural;
+
+   type Mark is record
+      X  : Integer := -1;
+      Y  : Integer := -1;
+      Seen : Natural := 0;
+   end record;
+   type Mark_List is array (1 .. Trail_Len) of Mark;
+   type Ghost_Marks is array (Ghost_Id) of Mark_List;
+   type Pos_List is array (Ghost_Id) of Integer;
 
    type Param_Array is array (Param_Index) of Integer;
    type Ghost_Array is array (Ghost_Id) of Ghost;
@@ -219,6 +244,17 @@ private
       Tiles          : Tile_Array := [others => [others => <>]];
       Error_Used     : Boolean := False;
       Error_Line     : Natural := 0;
+      Eater_Rng      : Interfaces.Unsigned_32 := 1;
+      Ghost_Rng      : Interfaces.Unsigned_32 := 1;
+      E_Marks        : Mark_List := [others => <>];
+      G_Marks        : Ghost_Marks := [others => <>];
+      Quiet          : Natural := 0;
+      Loop_On        : Boolean := False;
+      Loop_At        : Natural := 0;
+      Loop_EX        : Integer := 0;
+      Loop_EY        : Integer := 0;
+      Loop_GX        : Pos_List := [others => 0];
+      Loop_GY        : Pos_List := [others => 0];
    end record;
 
    The_Game : Game;
