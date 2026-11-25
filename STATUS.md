@@ -4,7 +4,7 @@
 - Live: commit-pinned githack page (the URL is on the pull request). Pages is wired and not enabled.
 - Test: `./run-tests.sh`. Local page: open `docs/index.html` after `./build.sh`. The stamp in that file matches `docs/version.txt`.
 - What: self-playing maze chase. Rules and both AIs are plain Ada compiled to WebAssembly. The page draws, takes buttons, and downloads reports.
-- Status (2026-11-25): round 3. The eater no longer steps into a ghost's reach when another exit is open, and it keeps a power pellet unless a ghost is close enough to catch or the eater is cornered. While the eater is powered, the four ghosts scatter in different directions. Stamp is the string in `version.txt` (v0.3).
+- Status (2026-11-25): round 3. The eater no longer steps into a ghost's reach when another exit is open, and it keeps a power pellet unless a ghost is close enough to catch or the eater is cornered. While the eater is powered, the four ghosts scatter in different directions. Stamp `v0.3 b20261125-1127 898b0b9`.
 - SPARK: not started (D-008). No proof run.
 - Gap: none recorded against D-005, D-007, D-025, or D-027. Wasm checks are off on purpose (D-027); `./run-tests.sh` runs the contracts.
 - Next: none agreed. Open questions are below.
