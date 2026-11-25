@@ -27,7 +27,7 @@ package Swarm is
    Ghost_Stride  : constant Param_Index := 9;
 
    -- Pos values are the numbers the page shows. Do not reorder them.
-   type Outcome_Kind is (Running, Won, Lost, Timed_Out);
+   type Outcome_Kind is (Running, Won, Lost, Timed_Out, Level_Cleared);
    type Decision_Code is
      (None, Seek_Pellet, Seek_Power, Flee, Hunt,
       Chase, Cutoff, Cover, Ghost_Flee, Return_Home);
@@ -85,11 +85,19 @@ package Swarm is
    -- The single game the browser calls. Native smoke uses its own Game.
    function Host_Started return Boolean;
 
+   function Level (G : Game) return Natural;
+   function Grid_Seed_Of (G : Game) return Interfaces.Unsigned_32;
+
+   -- The level is cleared. Carry the score and the lives onto a new grid.
+   procedure Advance (G : in out Game)
+   with Pre => Started (G) and then Outcome (G) = Level_Cleared,
+        Post => Started (G) and then Outcome (G) = Running;
+
 private
 
    type Event_Code is
      (Game_Start, Pellet_Eaten, Power_Eaten, Death, Catch,
-      Fright_End, Win, Lose, Timeout, Loop_Detected);
+      Fright_End, Win, Lose, Timeout, Loop_Detected, Level_Clear);
 
    Max_Decisions : constant := 1200;
    Max_Events    : constant := 600;
@@ -116,8 +124,10 @@ private
    W_Exits             : constant := 4;
    W_Progress          : constant := 7;
    W_E_Loop            : constant := 6;
-   W_Close             : constant := 10;
-   W_Block             : constant := 8;
+   W_Close             : constant := 28;
+   W_Block             : constant := 22;
+   Food_Pull           : constant := 240;
+   Tie_Gap             : constant := 12;
    W_Spread            : constant := 5;
    W_Tunnel            : constant := 7;
    W_G_Loop            : constant := 6;
@@ -255,6 +265,10 @@ private
       Loop_EY        : Integer := 0;
       Loop_GX        : Pos_List := [others => 0];
       Loop_GY        : Pos_List := [others => 0];
+      Level_No       : Natural := 1;
+      Longest_Quiet  : Natural := 0;
+      Wasted         : Natural := 0;
+      Eaten          : Natural := 0;
    end record;
 
    The_Game : Game;

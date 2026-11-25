@@ -56,6 +56,14 @@ package body Swarm.API is
    function Get_Deaths return Integer is (Deaths (The_Game));
    function Get_Catches return Integer is (Catches (The_Game));
    function Get_Tick_Count return Integer is (Tick_Count (The_Game));
+   function Get_Level return Integer is (Level (The_Game));
+   function Get_Grid_Seed return Interfaces.Unsigned_32 is
+     (Grid_Seed_Of (The_Game));
+
+   procedure Advance_Level is
+   begin
+      Advance (The_Game);
+   end Advance_Level;
    function Get_Pellets return Integer is (Pellets_Left (The_Game));
    function Get_Power return Integer is (Power_Left (The_Game));
 
@@ -147,6 +155,7 @@ package body Swarm.API is
          when 1 => Report.Set_Test_Key (Report.Key_Stop);
          when 2 => Report.Set_Test_Key (Report.Key_End);
          when 3 => Report.Set_Test_Key (Report.Key_Crash);
+         when 4 => Report.Set_Test_Key (Report.Key_Level);
          when others =>
             null;
       end case;

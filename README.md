@@ -27,9 +27,10 @@ its stamp with `docs/version.txt` when that file can be fetched.
   records them.
 - **New seeds** fills the three boxes. **Reset** builds that opening and waits.
   **Start** runs it, or resumes after Stop.
-- **Stop**, and the end of a game, each download two files: an eater report
-  and a ghost-team report. If a browser blocks the second file, the same
-  names are buttons under the maze.
+- **Stop**, a level clear, and the end of a game each download two files:
+  an eater report and a ghost-team report. A level clear keeps the score
+  and the lives and starts the next grid. If a browser blocks the second
+  file, the same names are buttons under the maze.
 - **Debug** or **F9** pauses and asks what you expected, then downloads the
   full debug report. A crash notice offers the report from the previous visit.
 

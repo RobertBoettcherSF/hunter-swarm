@@ -114,8 +114,8 @@ const STR = {
     start: "Start", stop: "Stop", reset: "Reset", speed: "Speed", debug: "Debug",
     sound_on: "Sound on", sound_off: "Sound off",
     grid: "Grid seed", eater: "Eater seed", ghosts: "Ghost seed", newseeds: "New seeds",
-    lives: "Lives", score: "Score", pellets: "Pellets", tick: "Tick",
-    ready: "Ready", running: "Running", paused: "Paused", won: "The eater cleared the maze", lost: "The ghost team stopped the eater", timed_out: "Time limit",
+    lives: "Lives", score: "Score", pellets: "Pellets", tick: "Tick", level: "Level",
+    ready: "Ready", running: "Running", paused: "Paused", won: "The eater cleared the maze", lost: "The ghost team stopped the eater", timed_out: "Time limit", level_clear: "Level clear",
     expected_help: "What did you expect?", download_debug: "Download debug report",
     crash: "The last visit did not end cleanly.", crashdl: "Download crash report", dismiss: "Dismiss",
     stale: "A newer build is on main. Reload the latest page.",
@@ -130,8 +130,8 @@ const STR = {
     start: "Start", stop: "Stopp", reset: "Zurücksetzen", speed: "Tempo", debug: "Debug",
     sound_on: "Ton an", sound_off: "Ton aus",
     grid: "Labyrinth-Startwert", eater: "Fresser-Startwert", ghosts: "Geister-Startwert", newseeds: "Neue Startwerte",
-    lives: "Leben", score: "Punkte", pellets: "Krümel", tick: "Takt",
-    ready: "Bereit", running: "Läuft", paused: "Pausiert", won: "Der Fresser hat das Labyrinth geleert", lost: "Die Geistermannschaft hat den Fresser gestoppt", timed_out: "Zeitgrenze",
+    lives: "Leben", score: "Punkte", pellets: "Krümel", tick: "Takt", level: "Stufe",
+    ready: "Bereit", running: "Läuft", paused: "Pausiert", won: "Der Fresser hat das Labyrinth geleert", lost: "Die Geistermannschaft hat den Fresser gestoppt", timed_out: "Zeitgrenze", level_clear: "Stufe geschafft",
     expected_help: "Was hatten Sie erwartet?", download_debug: "Debug-Bericht laden",
     crash: "Der letzte Besuch endete nicht sauber.", crashdl: "Absturzbericht laden", dismiss: "Schließen",
     stale: "Auf main liegt ein neuerer Stand. Laden Sie die neueste Seite.",
@@ -146,8 +146,8 @@ const STR = {
     start: "Empezar", stop: "Parar", reset: "Reiniciar", speed: "Velocidad", debug: "Depurar",
     sound_on: "Sonido activado", sound_off: "Sonido desactivado",
     grid: "Semilla del laberinto", eater: "Semilla del comedor", ghosts: "Semilla de los fantasmas", newseeds: "Nuevas semillas",
-    lives: "Vidas", score: "Puntos", pellets: "Bolitas", tick: "Ciclo",
-    ready: "Listo", running: "En juego", paused: "En pausa", won: "El comedor vació el laberinto", lost: "El equipo de fantasmas detuvo al comedor", timed_out: "Límite de tiempo",
+    lives: "Vidas", score: "Puntos", pellets: "Bolitas", tick: "Ciclo", level: "Nivel",
+    ready: "Listo", running: "En juego", paused: "En pausa", won: "El comedor vació el laberinto", lost: "El equipo de fantasmas detuvo al comedor", timed_out: "Límite de tiempo", level_clear: "Nivel superado",
     expected_help: "¿Qué esperaba?", download_debug: "Descargar informe de depuración",
     crash: "La visita anterior no terminó bien.", crashdl: "Descargar informe de fallo", dismiss: "Cerrar",
     stale: "Hay una versión más nueva en main. Recargue la página más reciente.",
@@ -162,8 +162,8 @@ const STR = {
     start: "Démarrer", stop: "Arrêter", reset: "Réinitialiser", speed: "Vitesse", debug: "Déboguer",
     sound_on: "Son activé", sound_off: "Son coupé",
     grid: "Graine du labyrinthe", eater: "Graine du mangeur", ghosts: "Graine des fantômes", newseeds: "Nouvelles graines",
-    lives: "Vies", score: "Score", pellets: "Pastilles", tick: "Cycle",
-    ready: "Prêt", running: "En cours", paused: "En pause", won: "Le mangeur a vidé le labyrinthe", lost: "L'équipe de fantômes a arrêté le mangeur", timed_out: "Limite de temps",
+    lives: "Vies", score: "Score", pellets: "Pastilles", tick: "Cycle", level: "Niveau",
+    ready: "Prêt", running: "En cours", paused: "En pause", won: "Le mangeur a vidé le labyrinthe", lost: "L'équipe de fantômes a arrêté le mangeur", timed_out: "Limite de temps", level_clear: "Niveau réussi",
     expected_help: "Qu'attendiez-vous ?", download_debug: "Télécharger le rapport de débogage",
     crash: "La visite précédente ne s'est pas terminée correctement.", crashdl: "Télécharger le rapport de plantage", dismiss: "Fermer",
     stale: "Une version plus récente est sur main. Rechargez la page la plus récente.",
@@ -419,7 +419,7 @@ expectgo.addEventListener("click", () => {
 });
 
 const SPEED = [{every: 6, burst: 1}, {every: 3, burst: 1}, {every: 1, burst: 1}, {every: 1, burst: 4}];
-const OUTCOME = ["running", "won", "lost", "timed_out"];
+const OUTCOME = ["running", "won", "lost", "timed_out", "level_clear"];
 function stepGame() {
   const sp = SPEED[Number(speed.value)] || SPEED[0];
   frameN += 1;
@@ -437,6 +437,15 @@ function stepGame() {
       if (ada.hs_lives() < lives) { beep(160, 0.16, 0.05); heard = true; }
       else if (ada.hs_score() - before >= 50 && ada.hs_pellets() < pellets) { beep(520, 0.07, 0.03); heard = true; }
       else if (ada.hs_score() - before >= 200) { beep(740, 0.06, 0.04); heard = true; }
+    }
+    if (oc === 4) {
+      savePair(4);
+      ada.hs_advance();
+      grid.value = String(ada.hs_grid_seed() >>> 0);
+      rememberSeeds();
+      startedKey = seedOf(grid) + ":" + seedOf(eater) + ":" + seedOf(ghosts);
+      beep(620, 0.08, 0.04);
+      return;
     }
     if (oc !== 0) {
       running = false;
@@ -528,7 +537,8 @@ function draw() {
   const code = ada.hs_decision(0);
   const key = DECISION_KEYS[code] || "none";
   const word = ended ? t(OUTCOME[oc] || "ready") : paused ? t("paused") : running ? t("running") : t("ready");
-  status.textContent = t("score") + " " + ada.hs_score()
+  status.textContent = t("level") + " " + ada.hs_level()
+    + " · " + t("score") + " " + ada.hs_score()
     + " · " + t("lives") + " " + ada.hs_lives()
     + " · " + t("pellets") + " " + ada.hs_pellets()
     + " · " + t("tick") + " " + ada.hs_tick_count()

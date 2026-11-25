@@ -53,6 +53,15 @@ package Swarm.API is
    function Get_Tick_Count return Integer
    with Export, Convention => C, External_Name => "hs_tick_count";
 
+   function Get_Level return Integer
+   with Export, Convention => C, External_Name => "hs_level";
+
+   function Get_Grid_Seed return Interfaces.Unsigned_32
+   with Export, Convention => C, External_Name => "hs_grid_seed";
+
+   procedure Advance_Level
+   with Export, Convention => C, External_Name => "hs_advance";
+
    function Get_Pellets return Integer
    with Export, Convention => C, External_Name => "hs_pellets";
 

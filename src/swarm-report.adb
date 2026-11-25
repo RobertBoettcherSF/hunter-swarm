@@ -133,6 +133,7 @@ package body Swarm.Report is
          when Lose => Add ("lose");
          when Timeout => Add ("timeout");
          when Loop_Detected => Add ("loop_detected");
+         when Level_Clear => Add ("level_clear");
       end case;
    end Add_Event_Name;
 
@@ -147,6 +148,7 @@ package body Swarm.Report is
          when Won => Add ("won");
          when Lost => Add ("lost");
          when Timed_Out => Add ("timed_out");
+         when Level_Cleared => Add ("level_clear");
       end case;
    end Add_Outcome;
 
@@ -157,6 +159,7 @@ package body Swarm.Report is
          when Key_Stop => Add ("stop");
          when Key_End => Add ("game-end");
          when Key_Crash => Add ("crash");
+         when Key_Level => Add ("level-clear");
       end case;
    end Add_Key;
 
@@ -331,6 +334,8 @@ package body Swarm.Report is
          Add (",""loop_ticks"":");
          Add_Nat (Loop_Ticks);
          Add (",""why_died_fields"":[""tick"",""killer"",""near"",""exits"",""decision"",""killer_dist_ago""]");
+         Add (",""eater_w_food"":");
+         Add_Nat (Food_Pull);
          Add (",""eater_w_pellet"":");
          Add_Nat (W_Pellet);
          Add (",""eater_w_power"":");
@@ -448,6 +453,16 @@ package body Swarm.Report is
       Add_Nat (Power_Left (G));
       Add (",""tick"":");
       Add_Nat (Tick_Count (G));
+      Add (",""level"":");
+      Add_Nat (G.Level_No);
+      Add (",""longest_gap"":");
+      Add_Nat (G.Longest_Quiet);
+      Add (",""wasted_per_pellet"":");
+      if G.Eaten = 0 then
+         Add_Nat (0);
+      else
+         Add_Nat (G.Wasted / G.Eaten);
+      end if;
       Add (",""outcome"":""");
       Add_Outcome (G);
       Add (""",""bias"":");

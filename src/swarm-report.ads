@@ -8,7 +8,7 @@ package Swarm.Report is
    Max_Report   : constant := 196608;
 
    type Side is (Side_Eater, Side_Ghosts, Side_F9, Side_Crash);
-   type Key_Name is (Key_F9, Key_Stop, Key_End, Key_Crash);
+   type Key_Name is (Key_F9, Key_Stop, Key_End, Key_Crash, Key_Level);
 
    procedure Set_Stamp (Text : String)
    with Pre => Text'Length <= Max_Stamp;

@@ -41,7 +41,7 @@ package body Swarm is
       2 => (DX => 0, DY => 1),
       3 => (DX => -1, DY => 0)];
 
-   type Seek_Kind is (Seek_Cell, Seek_Food, Seek_Power, Seek_Fright);
+   type Seek_Kind is (Seek_Cell, Seek_Food, Seek_Plain, Seek_Power, Seek_Fright);
    type Dist_Map is array (X_Pos, Y_Pos) of Natural;
    type Parent_Map is array (X_Pos, Y_Pos) of Integer;
 
@@ -439,6 +439,8 @@ package body Swarm is
             return Integer (X) = TX and then Integer (Y) = TY;
          when Seek_Food =>
             return G.Tiles (X, Y).Pellet or else G.Tiles (X, Y).Power;
+         when Seek_Plain =>
+            return G.Tiles (X, Y).Pellet;
          when Seek_Power =>
             return G.Tiles (X, Y).Power;
          when Seek_Fright =>
@@ -873,6 +875,8 @@ package body Swarm is
       TY := CY;
    end Cutoff_Target;
 
+   function Have_Plain (G : Game) return Boolean;
+
    procedure Add_Score (G : in out Game; Points : Natural) is
    begin
       pragma Assert (G.Score <= Score_Limit - Points);
@@ -903,6 +907,10 @@ package body Swarm is
          Add_Score (G, Pellet_Points);
          G.Ate := True;
          Push_Event (G, Pellet_Eaten, Integer (G.E_X), Integer (G.E_Y));
+         if not Have_Plain (G) and then G.Outcome = Running then
+            G.Outcome := Level_Cleared;
+            Push_Event (G, Level_Clear, G.Level_No, Integer (G.Score));
+         end if;
       end if;
       if G.Pellets = 0 and then G.Outcome = Running then
          G.Outcome := Won;
@@ -1079,24 +1087,49 @@ package body Swarm is
    end Remember;
 
    procedure Draw_Step
-     (Rng : in out Interfaces.Unsigned_32; C : Dice_Row;
+     (Rng : in out Interfaces.Unsigned_32; C : Dice_Row; Tie : Integer;
       X, Y : out Integer; Took : out Boolean)
    is
       Found : Boolean := False;
       Floor : Integer := 0;
       Total : Natural := 0;
       Roll, Acc : Natural := 0;
+      Best_I : Integer := -1;
+      Best_S : Integer := Integer'First;
+      Second_S : Integer := Integer'First;
+      Count : Natural := 0;
    begin
       Took := False;
       X := 0;
       Y := 0;
       for I in C'Range loop
-         if C (I).OK and then (not Found or else C (I).Score < Floor) then
-            Floor := C (I).Score;
-            Found := True;
+         if C (I).OK then
+            Count := Count + 1;
+            if Best_I < 0 or else C (I).Score > Best_S then
+               if Best_I >= 0 then
+                  Second_S := Best_S;
+               end if;
+               Best_S := C (I).Score;
+               Best_I := I;
+            elsif C (I).Score > Second_S then
+               Second_S := C (I).Score;
+            end if;
+            if not Found or else C (I).Score < Floor then
+               Floor := C (I).Score;
+               Found := True;
+            end if;
          end if;
       end loop;
-      if not Found then
+      if not Found or else Best_I < 0 then
+         return;
+      end if;
+      if Count = 1
+        or else (Tie >= 0 and then Second_S /= Integer'First
+                 and then Best_S - Second_S > Tie)
+      then
+         X := C (Best_I).X;
+         Y := C (Best_I).Y;
+         Took := True;
          return;
       end if;
       for I in C'Range loop
@@ -1478,22 +1511,50 @@ package body Swarm is
          Slots : Dice_Row := [others => <>];
          Safe_N : Natural := 0;
          Food_Here : Integer := Unseen;
-         Have_Here, Have_Next : Boolean;
+         Power_Here : Integer := Unseen;
+         Fright_Here : Integer := Unseen;
+         Ghost_D : Integer := Unseen;
+         Have_Here, Have_Pow, Have_Fright, Have_Next : Boolean;
          HX, HY, HD, HSX, HSY : Integer;
          NX_Food, NY_Food, ND, NSX, NSY : Integer;
-         Cornered : Boolean;
+         Cornered, Pull_Power : Boolean;
+         Threat : Dist_Map;
+         Any_Ghost : Boolean;
          Code : Decision_Code := Seek_Pellet;
          UX, UY : Integer;
          Took : Boolean;
       begin
          Seek_From
-           (G, Integer (G.E_X), Integer (G.E_Y), Seek_Food, 0, 0,
-            Order, False, False, True, True, False,
+           (G, Integer (G.E_X), Integer (G.E_Y), Seek_Plain, 0, 0,
+            Order, False, False, False, True, False,
             Have_Here, HX, HY, HD, HSX, HSY);
          if Have_Here then
             Food_Here := HD;
          end if;
+         Seek_From
+           (G, Integer (G.E_X), Integer (G.E_Y), Seek_Power, 0, 0,
+            Order, False, False, False, False, False,
+            Have_Pow, HX, HY, HD, HSX, HSY);
+         if Have_Pow then
+            Power_Here := HD;
+         end if;
+         Seek_From
+           (G, Integer (G.E_X), Integer (G.E_Y), Seek_Fright, 0, 0,
+            Order, False, False, False, True, False,
+            Have_Fright, HX, HY, HD, HSX, HSY);
+         if Have_Fright then
+            Fright_Here := HD;
+         end if;
+         Hostile_Map (G, Threat, Any_Ghost);
+         if Any_Ghost and then Threat (G.E_X, G.E_Y) /= Unseen then
+            Ghost_D := Integer (Threat (G.E_X, G.E_Y));
+         end if;
          Cornered := Pincer or else Reaches_Us or else Safe_Exits = 0;
+         -- A ghost is close and the power pellet is closer than that ghost,
+         -- or the ordinary pellets are already gone.
+         Pull_Power := Have_Pow and then
+           (not Have_Here
+            or else (Ghost_D <= G.Params (Threat_Range) and then Power_Here < Ghost_D));
          for K in 0 .. 3 loop
             declare
                NX, NY : Integer;
@@ -1537,12 +1598,39 @@ package body Swarm is
                      Score := Score - 500;
                   end if;
                   Score := Score + W_Exits * Integer (Egress (G, NX, NY));
-                  Seek_From
-                    (G, NX, NY, Seek_Food, 0, 0,
-                     Order, False, False, True, True, False,
-                     Have_Next, NX_Food, NY_Food, ND, NSX, NSY);
-                  if Have_Here and then Have_Next and then ND < Food_Here then
-                     Score := Score + W_Progress * (Food_Here - ND);
+                  if Have_Here then
+                     Seek_From
+                       (G, NX, NY, Seek_Plain, 0, 0,
+                        Order, False, False, False, True, False,
+                        Have_Next, NX_Food, NY_Food, ND, NSX, NSY);
+                     if Have_Next and then ND + 1 = Food_Here then
+                        Score := Score + Food_Pull;
+                     elsif Have_Next and then ND < Food_Here then
+                        Score := Score + Food_Pull / 2;
+                     end if;
+                  end if;
+                  if Pull_Power then
+                     Seek_From
+                       (G, NX, NY, Seek_Power, 0, 0,
+                        Order, False, False, False, False, False,
+                        Have_Next, NX_Food, NY_Food, ND, NSX, NSY);
+                     if Have_Next and then ND + 1 = Power_Here then
+                        Score := Score + Food_Pull;
+                        if not Have_Here then
+                           Score := Score + Food_Pull / 2;
+                        end if;
+                     end if;
+                  end if;
+                  if G.Power_Left > 0 and then Have_Fright
+                    and then Fright_Here <= G.Power_Left
+                  then
+                     Seek_From
+                       (G, NX, NY, Seek_Fright, 0, 0,
+                        Order, False, False, False, True, False,
+                        Have_Next, NX_Food, NY_Food, ND, NSX, NSY);
+                     if Have_Next and then ND + 1 = Fright_Here then
+                        Score := Score + Food_Pull + W_Power;
+                     end if;
                   end if;
                   if G.Power_Left > 0 then
                      for Id in Ghost_Id loop
@@ -1579,13 +1667,15 @@ package body Swarm is
                end if;
             end loop;
          end if;
-         Draw_Step (G.Eater_Rng, Slots, UX, UY, Took);
+         Draw_Step (G.Eater_Rng, Slots, Tie_Gap, UX, UY, Took);
          if not Took then
             UX := Integer (G.E_X);
             UY := Integer (G.E_Y);
-         elsif Power_At (G, UX, UY) and then (Cornered or else Catchable) then
+         elsif Power_At (G, UX, UY)
+           and then (Pull_Power or else Cornered or else Catchable or else not Have_Here)
+         then
             Code := Seek_Power;
-         elsif G.Power_Left > 0 then
+         elsif G.Power_Left > 0 and then Have_Fright then
             Code := Hunt;
          elsif Cornered or else Lethal_Cell (G, Integer (G.E_X), Integer (G.E_Y)) then
             Code := Flee;
@@ -1593,7 +1683,19 @@ package body Swarm is
             Code := Seek_Pellet;
          end if;
          Remember (G.E_Marks, UX, UY, G.Tick);
-         Finish (Code, UX, UY, UX, UY, 0);
+         declare
+            Old_X : constant X_Pos := G.E_X;
+            Old_Y : constant Y_Pos := G.E_Y;
+         begin
+            Finish (Code, UX, UY, UX, UY, 0);
+            if G.E_X /= Old_X or else G.E_Y /= Old_Y then
+               if G.Ate then
+                  G.Eaten := G.Eaten + 1;
+               else
+                  G.Wasted := G.Wasted + 1;
+               end if;
+            end if;
+         end;
       end;
    end Move_Eater;
 
@@ -1761,7 +1863,7 @@ package body Swarm is
                end if;
             end;
          end loop;
-         Draw_Step (G.Ghost_Rng, Slots, UX, UY, Took);
+         Draw_Step (G.Ghost_Rng, Slots, -1, UX, UY, Took);
          if not Took then
             UX := Integer (G.Ghosts (Id).X);
             UY := Integer (G.Ghosts (Id).Y);
@@ -2289,9 +2391,7 @@ package body Swarm is
       end loop;
    end Paint_Generated;
 
-   procedure Start
-     (G : in out Game; Grid_Seed, Eater_Seed, Ghost_Seed : Interfaces.Unsigned_32)
-   is
+   procedure Deal (G : in out Game) is
       type Point is record
          X : X_Pos;
          Y : Y_Pos;
@@ -2299,21 +2399,12 @@ package body Swarm is
       Floors : array (0 .. Width * Height - 1) of Point;
       Floor_Count : Natural := 0;
       Used : array (X_Pos, Y_Pos) of Boolean := [others => [others => False]];
+      Mix : Interfaces.Unsigned_32;
    begin
-      Ensure (G);
       G.Started := False;
-      G.Grid_Seed := Grid_Seed;
-      G.Eater_Seed := Eater_Seed;
-      G.Ghost_Seed := Ghost_Seed;
-      G.Bias := Natural (Ghost_Seed mod 4);
-      G.Eater_Bias := Natural (Eater_Seed mod 4);
       G.Commit_Left := 0;
       G.Death_Count := 0;
       G.Tick := 0;
-      G.Score := 0;
-      G.Lives := 0;
-      G.Deaths := 0;
-      G.Catches := 0;
       G.Pellets := 0;
       G.Power_Left := 0;
       G.Chain := 0;
@@ -2322,28 +2413,31 @@ package body Swarm is
       G.Respawn_Pause := 0;
       G.Outcome := Running;
       G.Role_Timer := 0;
-      G.Error_Used := False;
-      G.Error_Line := 0;
       G.E_DX := 1;
       G.E_DY := 0;
-      G.Eater_Rng := Eater_Seed;
+      Mix := G.Eater_Seed xor Interfaces.Unsigned_32 (G.Level_No);
+      G.Eater_Rng := Mix * 1664525 + 1013904223;
       if G.Eater_Rng = 0 then
          G.Eater_Rng := 1;
       end if;
-      G.Ghost_Rng := Ghost_Seed;
+      Mix := G.Ghost_Seed xor Interfaces.Unsigned_32 (G.Level_No);
+      G.Ghost_Rng := Mix * 1664525 + 1013904223;
       if G.Ghost_Rng = 0 then
          G.Ghost_Rng := 1;
       end if;
       G.E_Marks := [others => <>];
       G.G_Marks := [others => <>];
       G.Quiet := 0;
+      G.Longest_Quiet := 0;
+      G.Wasted := 0;
+      G.Eaten := 0;
       G.Loop_On := False;
       G.Loop_At := 0;
       Clear_Logs (G);
-      if Grid_Seed = 0 then
+      if G.Grid_Seed = 0 then
          Paint_Hand (G);
       else
-         Paint_Generated (G, Grid_Seed);
+         Paint_Generated (G, G.Grid_Seed);
       end if;
       for Y in Y_Pos loop
          for X in X_Pos loop
@@ -2376,7 +2470,7 @@ package body Swarm is
       end loop;
       declare
          Index : Natural :=
-           Natural (Eater_Seed mod Interfaces.Unsigned_32 (Floor_Count));
+           Natural (G.Eater_Seed mod Interfaces.Unsigned_32 (Floor_Count));
          Chosen : Boolean := False;
       begin
          for Attempt in 1 .. Floor_Count loop
@@ -2418,7 +2512,41 @@ package body Swarm is
       Assign_Flee (G);
       G.Started := True;
       Push_Event (G, Game_Start, Integer (G.Bias), Integer (G.Pellets));
+   end Deal;
+
+   procedure Start
+     (G : in out Game; Grid_Seed, Eater_Seed, Ghost_Seed : Interfaces.Unsigned_32)
+   is
+   begin
+      Ensure (G);
+      G.Grid_Seed := Grid_Seed;
+      G.Eater_Seed := Eater_Seed;
+      G.Ghost_Seed := Ghost_Seed;
+      G.Bias := Natural (Ghost_Seed mod 4);
+      G.Eater_Bias := Natural (Eater_Seed mod 4);
+      G.Level_No := 1;
+      G.Score := 0;
+      G.Lives := Initial_Lives;
+      G.Deaths := 0;
+      G.Catches := 0;
+      G.Error_Used := False;
+      G.Error_Line := 0;
+      Deal (G);
    end Start;
+
+   procedure Advance (G : in out Game) is
+      Next : Interfaces.Unsigned_32;
+   begin
+      pragma Assert (G.Outcome = Level_Cleared);
+      G.Level_No := G.Level_No + 1;
+      Next := G.Grid_Seed * 1664525 + 1013904223
+        + Interfaces.Unsigned_32 (G.Level_No);
+      if Next = 0 then
+         Next := 1;
+      end if;
+      G.Grid_Seed := Next;
+      Deal (G);
+   end Advance;
 
    procedure Tick (G : in out Game) is
       Old_Score : constant Natural := G.Score;
@@ -2470,11 +2598,17 @@ package body Swarm is
       else
          G.Ticks_Since_Eat := G.Ticks_Since_Eat + 1;
       end if;
+      if G.Quiet > G.Longest_Quiet then
+         G.Longest_Quiet := G.Quiet;
+      end if;
       if G.Ate or else G.Lives < Old_Lives then
          G.Quiet := 0;
          G.Loop_On := False;
       elsif G.Outcome = Running then
          G.Quiet := G.Quiet + 1;
+         if G.Quiet > G.Longest_Quiet then
+            G.Longest_Quiet := G.Quiet;
+         end if;
          if G.Quiet >= Loop_Ticks and then not G.Loop_On then
             G.Loop_On := True;
             G.Loop_At := G.Tick;
@@ -2532,6 +2666,17 @@ package body Swarm is
       end if;
       return G.Outcome;
    end Outcome;
+
+   function Level (G : Game) return Natural is
+   begin
+      if not G.Started then
+         return 1;
+      end if;
+      return G.Level_No;
+   end Level;
+
+   function Grid_Seed_Of (G : Game) return Interfaces.Unsigned_32 is
+     (G.Grid_Seed);
 
    function Score (G : Game) return Natural is
    begin

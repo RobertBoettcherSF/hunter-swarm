@@ -98,6 +98,48 @@ begin
       pragma Assert (Powers (G) = At_Start);
    end;
 
+   -- Robert's v0.5 stop: grid 1515985934, eater 2784184650, ghosts 3466507203.
+   -- All ordinary pellets were eaten and the four power pellets were left
+   -- on the board while the game kept running. The level must clear instead,
+   -- and the score must carry onto the next grid.
+   Swarm.Start (G, 1515985934, 2784184650, 3466507203);
+   declare
+      function Plain (Game : Swarm.Game) return Natural is
+         N : Natural := 0;
+      begin
+         for Y in 0 .. Swarm.Height - 1 loop
+            for X in 0 .. Swarm.Width - 1 loop
+               if Swarm.Tile_Code (Game, X, Y) = 2 then
+                  N := N + 1;
+               end if;
+            end loop;
+         end loop;
+         return N;
+      end Plain;
+      Held : Natural;
+      Previous : Interfaces.Unsigned_32;
+   begin
+      while Swarm.Outcome (G) = Swarm.Running and then Swarm.Tick_Count (G) < 2500 loop
+         Swarm.Tick (G);
+      end loop;
+      pragma Assert (Swarm.Outcome (G) = Swarm.Level_Cleared);
+      pragma Assert (Plain (G) = 0);
+      pragma Assert (Swarm.Tick_Count (G) < 2500);
+      pragma Assert (Swarm.Level (G) = 1);
+      Held := Swarm.Score (G);
+      Previous := Swarm.Grid_Seed_Of (G);
+      Swarm.Report.Set_Test_Key (Swarm.Report.Key_Level);
+      Swarm.Report.Build (G, Swarm.Report.Side_Eater);
+      Need ("""test_key"":""level-clear""");
+      Need ("""level"":1");
+      Swarm.Advance (G);
+      pragma Assert (Swarm.Outcome (G) = Swarm.Running);
+      pragma Assert (Swarm.Level (G) = 2);
+      pragma Assert (Swarm.Score (G) = Held);
+      pragma Assert (Swarm.Grid_Seed_Of (G) /= Previous);
+      pragma Assert (Plain (G) > 0);
+   end;
+
    -- Robert's v0.4 stop: grid 1669911216, eater 2140701905, ghosts 367263220.
    -- From tick 298 to 472 the eater ate nothing and did not die. A dry run
    -- this long means the power-saving rule is toggling and the test fails.
@@ -154,6 +196,9 @@ begin
    Need ("loop_ticks");
    Need ("killer_dist_ago");
    Need ("""decision""");
+   Need ("""level""");
+   Need ("longest_gap");
+   Need ("wasted_per_pellet");
    Need ("""test_key"":""game-end""");
    Need ("""expected"":""smoke run""");
    Need ("""action_log""");
